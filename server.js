@@ -839,6 +839,14 @@ app.post('/api/auth/login', async (req, res) => {
           });
         }
 
+        if (localUser?.accountStatus === 'Suspended') {
+          revokeUserSessions(localUser.id, normalizedEmail);
+          saveDb(db);
+          return res.status(403).json({
+            error: 'Your account has been suspended by the CIRRS Platform Administrator due to policy violations.'
+          });
+        }
+
         const mergedUser = {
           id: sbUser.id,
           name: profile?.name || sbUser.user_metadata?.name || localUser?.name || normalizedEmail.split('@')[0],
@@ -2631,6 +2639,24 @@ app.post('/api/admin/municipalities', optionalAuth, (req, res) => {
   db.municipalities = [newMun, ...(db.municipalities || [])];
   saveDb(db);
   res.status(201).json({ municipality: newMun });
+});
+
+// 13e-2. Update Municipality Verification / Operational Status
+app.patch('/api/admin/municipalities/:id', optionalAuth, (req, res) => {
+  const { id } = req.params;
+  const patch = req.body || {};
+  db.municipalities = db.municipalities || [];
+  const idx = db.municipalities.findIndex((m) => m.id === id);
+  if (idx !== -1) {
+    db.municipalities[idx] = { ...db.municipalities[idx], ...patch };
+  } else {
+    db.municipalities.push({ id, ...patch });
+  }
+  saveDb(db);
+  res.json({
+    message: `Updated municipality ${id}`,
+    municipality: db.municipalities.find((m) => m.id === id)
+  });
 });
 
 // 13f. Update Citizen Account Status (Suspend / Activate)

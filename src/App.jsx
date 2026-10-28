@@ -145,7 +145,16 @@ export default function App() {
         if (el) el.scrollIntoView({ behavior: 'smooth' });
       }, 100);
       return;
-    } else if (['landing', 'dashboard', 'my-complaints', 'officer-dashboard'].includes(view)) {
+    } else if (
+      [
+        'landing',
+        'dashboard',
+        'my-complaints',
+        'officer-dashboard',
+        'admin-dashboard',
+        'admin-login'
+      ].includes(view)
+    ) {
       setActiveView(view);
     } else {
       setActiveView('landing');

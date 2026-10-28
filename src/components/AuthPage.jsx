@@ -124,7 +124,10 @@ export default function AuthPage({
     setIsSubmitting(true);
     setFormError('');
     try {
-      await civicDataService.verifyEmail(email);
+      const verifiedUser = await civicDataService.verifyEmail(email);
+      if (verifiedUser?.role) {
+        setSelectedRole(verifiedUser.role);
+      }
       setIsSubmitting(false);
       setVerificationSuccess(true);
     } catch (err) {
@@ -379,7 +382,18 @@ export default function AuthPage({
                   type="button"
                   onClick={() => {
                     setAuthMode('login');
-                    setEmail(selectedRole === 'officer' ? 'rajesh.sharma@indore.gov.in' : 'priya.sharma@example.com');
+                    setFormError('');
+                    setAdminVerificationBlock(null);
+                    if (!email) {
+                      setEmail(
+                        selectedRole === 'officer'
+                          ? 'rajesh.sharma@indore.gov.in'
+                          : 'priya.sharma@example.com'
+                      );
+                      setPassword(
+                        selectedRole === 'officer' ? 'CivicConnect#2026' : 'PriyaSecure#2026'
+                      );
+                    }
                   }}
                   className={`py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                     authMode === 'login'
@@ -392,7 +406,19 @@ export default function AuthPage({
 
                 <button
                   type="button"
-                  onClick={() => setAuthMode('register')}
+                  onClick={() => {
+                    setAuthMode('register');
+                    setFormError('');
+                    setAdminVerificationBlock(null);
+                    if (
+                      email === 'rajesh.sharma@indore.gov.in' ||
+                      email === 'priya.sharma@example.com'
+                    ) {
+                      setEmail('');
+                      setPassword('');
+                      setConfirmPassword('');
+                    }
+                  }}
                   className={`py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                     authMode === 'register'
                       ? 'bg-white text-blue-600 shadow-xs'
@@ -586,16 +612,26 @@ export default function AuthPage({
                 </div>
               ) : (
                 <>
-                  {/* ACCOUNT ROLE SELECTOR TILES (Only on Register mode) */}
-                  {authMode === 'register' && (
+                  {/* ACCOUNT ROLE SELECTOR TILES (Available on both Login and Register modes) */}
+                  {(authMode === 'register' || authMode === 'login') && (
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-700">Select Registration Profile</label>
+                      <label className="text-xs font-bold text-slate-700">
+                        {authMode === 'login' ? 'Select Account Role' : 'Select Registration Profile'}
+                      </label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                         {/* Citizen Tile */}
                         <div
                           onClick={() => {
                             setSelectedRole('citizen');
-                            setEmail('priya.sharma@example.com');
+                            setFormError('');
+                            setAdminVerificationBlock(null);
+                            if (
+                              authMode === 'login' &&
+                              (!email || email === 'rajesh.sharma@indore.gov.in')
+                            ) {
+                              setEmail('priya.sharma@example.com');
+                              setPassword('PriyaSecure#2026');
+                            }
                           }}
                           className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
                             selectedRole === 'citizen'
@@ -623,7 +659,15 @@ export default function AuthPage({
                         <div
                           onClick={() => {
                             setSelectedRole('officer');
-                            setEmail('rajesh.sharma@indore.gov.in');
+                            setFormError('');
+                            setAdminVerificationBlock(null);
+                            if (
+                              authMode === 'login' &&
+                              (!email || email === 'priya.sharma@example.com')
+                            ) {
+                              setEmail('rajesh.sharma@indore.gov.in');
+                              setPassword('CivicConnect#2026');
+                            }
                           }}
                           className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
                             selectedRole === 'officer'

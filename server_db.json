@@ -153,168 +153,6 @@
         "autoRefreshInterval": "30 Seconds (Real-time Telemetry)",
         "language": "English (Official GovTech) / हिन्दी"
       }
-    },
-    {
-      "id": "usr_1793170098279",
-      "name": "Test Citizen",
-      "email": "test.citizen.1793170096511@example.com",
-      "password": "Password123!",
-      "phone": "+91 98765 43210",
-      "role": "citizen",
-      "city": "Indore, Madhya Pradesh",
-      "ward": "Ward 18, Zone 4",
-      "citizenId": "#IND-5231",
-      "designation": "Verified Citizen",
-      "initials": "TC",
-      "isVerified": false,
-      "adminVerified": true,
-      "verificationStatus": "Verified",
-      "accountStatus": "Active",
-      "createdAt": "28 Oct 2026",
-      "notificationPrefs": {
-        "status": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "assignment": {
-          "inApp": true,
-          "email": true,
-          "sms": false
-        },
-        "resolution": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "announcements": {
-          "inApp": true,
-          "email": false,
-          "sms": false
-        },
-        "slaBreachSms": true,
-        "highPriorityPush": true,
-        "aiTriageDigest": true,
-        "citizenFeedbackAlert": false
-      },
-      "appPrefs": {
-        "defaultCity": "Indore (IMC)",
-        "defaultWard": "Ward 18 (Vijay Nagar / Scheme 54)",
-        "preferredLandmark": "Orbit Mall Crossing / AB Road",
-        "autoGps": true,
-        "defaultMapLayer": "Standard GIS Vector",
-        "autoRefreshInterval": "30 Seconds (Real-time Telemetry)",
-        "language": "English (Official GovTech) / हिन्दी"
-      }
-    },
-    {
-      "id": "usr_1793170247260",
-      "name": "Test Citizen",
-      "email": "test.citizen.1793170246261@example.com",
-      "password": "Password123!",
-      "phone": "+91 98765 43210",
-      "role": "citizen",
-      "city": "Indore, Madhya Pradesh",
-      "ward": "Ward 18, Zone 4",
-      "citizenId": "#IND-8024",
-      "designation": "Verified Citizen",
-      "initials": "TC",
-      "isVerified": true,
-      "adminVerified": true,
-      "verificationStatus": "Verified",
-      "accountStatus": "Active",
-      "createdAt": "28 Oct 2026",
-      "notificationPrefs": {
-        "status": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "assignment": {
-          "inApp": true,
-          "email": true,
-          "sms": false
-        },
-        "resolution": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "announcements": {
-          "inApp": true,
-          "email": false,
-          "sms": false
-        },
-        "slaBreachSms": true,
-        "highPriorityPush": true,
-        "aiTriageDigest": true,
-        "citizenFeedbackAlert": false
-      },
-      "appPrefs": {
-        "defaultCity": "Indore (IMC)",
-        "defaultWard": "Ward 18 (Vijay Nagar / Scheme 54)",
-        "preferredLandmark": "Orbit Mall Crossing / AB Road",
-        "autoGps": true,
-        "defaultMapLayer": "Standard GIS Vector",
-        "autoRefreshInterval": "30 Seconds (Real-time Telemetry)",
-        "language": "English (Official GovTech) / हिन्दी"
-      }
-    },
-    {
-      "id": "officer_IMC-ENG-9936",
-      "name": "Er. Vikram Rathore",
-      "email": "nodal.seoni.1793170248398@mpurban.gov.in",
-      "password": "Password123!",
-      "phone": "+91 98765 43210",
-      "role": "officer",
-      "city": "Seoni Municipal Council",
-      "ward": "Zone 04 (Wards 18–24)",
-      "zone": "Zone 04 - East Indore (Wards 18–24)",
-      "department": "Public Works & Roads",
-      "designation": "Municipal Officer (Public Works & Roads)",
-      "officerId": "IMC-ENG-9936",
-      "initials": "VR",
-      "isVerified": true,
-      "adminVerified": false,
-      "verificationStatus": "Rejected",
-      "accountStatus": "Active",
-      "createdAt": "28 Oct 2026",
-      "notificationPrefs": {
-        "status": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "assignment": {
-          "inApp": true,
-          "email": true,
-          "sms": false
-        },
-        "resolution": {
-          "inApp": true,
-          "email": true,
-          "sms": true
-        },
-        "announcements": {
-          "inApp": true,
-          "email": false,
-          "sms": false
-        },
-        "slaBreachSms": true,
-        "highPriorityPush": true,
-        "aiTriageDigest": true,
-        "citizenFeedbackAlert": false
-      },
-      "appPrefs": {
-        "defaultCity": "Indore (IMC)",
-        "defaultWard": "Ward 18 (Vijay Nagar / Scheme 54)",
-        "preferredLandmark": "Orbit Mall Crossing / AB Road",
-        "autoGps": true,
-        "defaultMapLayer": "Standard GIS Vector",
-        "autoRefreshInterval": "30 Seconds (Real-time Telemetry)",
-        "language": "English (Official GovTech) / हिन्दी"
-      },
-      "adminRejectionReason": "Departmental transfer pending re-authorization"
     }
   ],
   "municipalities": [],
@@ -545,93 +383,8 @@
       "activeTickets": 0
     }
   ],
-  "notifications": [
-    {
-      "id": "notif-verify-1793170249762",
-      "roleTarget": "all",
-      "title": "Municipal Officer Rejected: Er. Vikram Rathore",
-      "message": "Er. Vikram Rathore (nodal.seoni.1793170248398@mpurban.gov.in) status set to Rejected. Reason: Departmental transfer pending re-authorization",
-      "time": "Just now",
-      "read": false,
-      "type": "verification"
-    },
-    {
-      "id": "notif-verify-1793170249232",
-      "roleTarget": "all",
-      "title": "Municipal Officer Approved: Er. Vikram Rathore",
-      "message": "Er. Vikram Rathore (nodal.seoni.1793170248398@mpurban.gov.in) has been verified by CIRRS Super Admin and can now log in.",
-      "time": "Just now",
-      "read": false,
-      "type": "verification"
-    },
-    {
-      "id": "notif-admin-officer-1793170248883",
-      "roleTarget": "admin",
-      "title": "Municipal Officer Verification Request",
-      "message": "Er. Vikram Rathore (nodal.seoni.1793170248398@mpurban.gov.in · Seoni Municipal Council) registered as a Municipal Officer and awaits Super Admin verification.",
-      "time": "Just now",
-      "read": false,
-      "type": "verification"
-    },
-    {
-      "id": "notif-1793160272434",
-      "roleTarget": "all",
-      "title": "Report Submitted & Assigned",
-      "message": "Ticket #CC10247 has been generated and routed to Indore PWD Road Maintenance Squad #04.",
-      "time": "Just now",
-      "read": false,
-      "type": "assignment",
-      "ticketId": "CC10247"
-    },
-    {
-      "id": "notif-1793160186381",
-      "roleTarget": "all",
-      "title": "Report Submitted & Assigned",
-      "message": "Ticket #CC10246 has been generated and routed to Indore PWD Road Maintenance Squad #04.",
-      "time": "Just now",
-      "read": false,
-      "type": "assignment",
-      "ticketId": "CC10246"
-    }
-  ],
-  "timelineUpdates": [
-    {
-      "id": "upd-1793160273535",
-      "ticketId": "CC10247",
-      "time": "Just now",
-      "actor": "Verified Citizen / Officer",
-      "action": "Photo Evidence Attached",
-      "description": "E2E Test Photo Upload",
-      "type": "dispatch"
-    },
-    {
-      "id": "upd-1793160272434",
-      "ticketId": "CC10247",
-      "time": "Just now",
-      "actor": "Priya Sharma & AI Router",
-      "action": "Ticket Generated & Routed",
-      "description": "Report verified and work order created for Indore PWD Road Maintenance Squad #04 (72h statutory SLA).",
-      "type": "created"
-    },
-    {
-      "id": "upd-1793160187581",
-      "ticketId": "undefined",
-      "time": "Just now",
-      "actor": "Verified Citizen / Officer",
-      "action": "Photo Evidence Attached",
-      "description": "Uploaded geo-tagged photographic evidence to ticket record.",
-      "type": "dispatch"
-    },
-    {
-      "id": "upd-1793160186381",
-      "ticketId": "CC10246",
-      "time": "Just now",
-      "actor": "Priya Sharma & AI Router",
-      "action": "Ticket Generated & Routed",
-      "description": "Report verified and work order created for Indore PWD Road Maintenance Squad #04 (72h statutory SLA).",
-      "type": "created"
-    }
-  ],
+  "notifications": [],
+  "timelineUpdates": [],
   "sessions": {
     "civic_jwt_usr_1793170098279_1793170098294_706aeba90c3ec39c00fab2b5": {
       "userId": "usr_1793170098279",
@@ -656,6 +409,18 @@
       "email": "cirrs-hq@gov.in",
       "role": "admin",
       "createdAt": "2026-10-28T06:50:49.219Z"
+    },
+    "civic_jwt_admin_CIRRS_HQ_001_1793175673663_6f19bd3a4ba4d82c1135c244": {
+      "userId": "admin_CIRRS_HQ_001",
+      "email": "cirrs-hq@gov.in",
+      "role": "admin",
+      "createdAt": "2026-10-28T08:21:13.663Z"
+    },
+    "civic_jwt_officer_IMC-ENG-5902_1793175674179_caf45c8c99fad0073227f8a6": {
+      "userId": "officer_IMC-ENG-5902",
+      "email": "qa.officer.1793175673028@mpurban.gov.in",
+      "role": "officer",
+      "createdAt": "2026-10-28T08:21:14.179Z"
     }
   }
 }

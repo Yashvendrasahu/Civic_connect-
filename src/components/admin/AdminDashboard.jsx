@@ -54,13 +54,32 @@ export default function AdminDashboard({
           setOfficers(overviewData.officers);
         }
         if (Array.isArray(overviewData.municipalities) && overviewData.municipalities.length > 0) {
-          setMunicipalities(overviewData.municipalities);
+          const liveMunMap = new Map(overviewData.municipalities.map((m) => [m.id, m]));
+          const mergedMuns = ADMIN_REFERENCE_MUNICIPALITIES.map((ref) =>
+            liveMunMap.has(ref.id) ? { ...ref, ...liveMunMap.get(ref.id) } : ref
+          );
+          const brandNewMuns = overviewData.municipalities.filter(
+            (m) => !ADMIN_REFERENCE_MUNICIPALITIES.some((ref) => ref.id === m.id)
+          );
+          setMunicipalities([...brandNewMuns, ...mergedMuns]);
         }
         if (Array.isArray(overviewData.citizens) && overviewData.citizens.length > 0) {
-          setCitizens(overviewData.citizens);
+          const refEmails = new Set(
+            ADMIN_REFERENCE_CITIZENS.map((c) => (c.email || '').toLowerCase())
+          );
+          const newLiveCitizens = overviewData.citizens.filter(
+            (c) => !refEmails.has((c.email || '').toLowerCase())
+          );
+          setCitizens([...newLiveCitizens, ...ADMIN_REFERENCE_CITIZENS]);
         }
         if (Array.isArray(overviewData.complaints) && overviewData.complaints.length > 0) {
-          setAdminComplaints(overviewData.complaints);
+          const refIds = new Set(
+            ADMIN_REFERENCE_COMPLAINTS.map((c) => String(c.id).replace(/^#/, ''))
+          );
+          const newLiveComplaints = overviewData.complaints.filter(
+            (c) => !refIds.has(String(c.id).replace(/^#/, ''))
+          );
+          setAdminComplaints([...newLiveComplaints, ...ADMIN_REFERENCE_COMPLAINTS]);
         }
       }
     } catch (e) {
@@ -156,7 +175,7 @@ export default function AdminDashboard({
   const handleAddMunicipality = async (munData) => {
     const created = await civicDataService.addMunicipality(munData);
     if (created) {
-      setMunicipalities((prev) => [created, ...prev]);
+      setMunicipalities((prev) => [created, ...prev.filter((m) => m.id !== created.id)]);
     }
     if (onShowToast) {
       onShowToast(`Onboarded ${munData.name} into CIRRS network`);
@@ -164,6 +183,7 @@ export default function AdminDashboard({
   };
 
   const handleUpdateMunicipalityStatus = async (munId, patch) => {
+    await civicDataService.updateMunicipalityStatus(munId, patch);
     setMunicipalities((prev) =>
       prev.map((m) => (m.id === munId ? { ...m, ...patch } : m))
     );
@@ -327,6 +347,8 @@ export default function AdminDashboard({
                   if (e.key === 'Enter' && globalSearch.trim()) {
                     setActiveTab('complaints');
                     setSelectedDossier(null);
+                  } else if (e.key === 'Escape') {
+                    setGlobalSearch('');
                   }
                 }}
                 placeholder="Search complaints, municipalities, cit..."
@@ -335,6 +357,82 @@ export default function AdminDashboard({
               <span className="absolute right-2.5 top-1.5 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-mono text-slate-400">
                 ⌘K
               </span>
+
+              {globalSearch.trim() && (
+                <div className="absolute right-0 left-0 top-10 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 text-xs max-h-80 overflow-y-auto space-y-1">
+                  {mergedComplaints
+                    .filter((c) => {
+                      const q = globalSearch.toLowerCase();
+                      return (
+                        String(c.id || '').toLowerCase().includes(q) ||
+                        String(c.title || '').toLowerCase().includes(q) ||
+                        String(c.municipality || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 3)
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          handleSelectComplaint(c);
+                          setGlobalSearch('');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-blue-50 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="truncate">
+                          <span className="font-bold text-blue-600 mr-1.5">{c.id}</span>
+                          <span className="font-semibold text-slate-800">{c.title}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0">{c.municipality}</span>
+                      </button>
+                    ))}
+
+                  {municipalities
+                    .filter((m) =>
+                      String(m.name || '').toLowerCase().includes(globalSearch.toLowerCase())
+                    )
+                    .slice(0, 2)
+                    .map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDossier(null);
+                          setActiveTab('municipalities');
+                          setGlobalSearch('');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <span className="font-bold text-slate-800">{m.name}</span>
+                        <span className="text-[10px] font-mono text-emerald-700">{m.id}</span>
+                      </button>
+                    ))}
+
+                  {citizens
+                    .filter(
+                      (cit) =>
+                        String(cit.name || '').toLowerCase().includes(globalSearch.toLowerCase()) ||
+                        String(cit.id || '').toLowerCase().includes(globalSearch.toLowerCase())
+                    )
+                    .slice(0, 2)
+                    .map((cit) => (
+                      <button
+                        key={cit.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDossier(null);
+                          setActiveTab('citizens');
+                          setGlobalSearch('');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <span className="font-bold text-slate-800">{cit.name}</span>
+                        <span className="text-[10px] font-mono text-indigo-600">{cit.id}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
             </div>
 
             {/* Notification Bell */}

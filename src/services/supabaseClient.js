@@ -947,6 +947,21 @@ export const civicDataService = {
     };
   },
 
+  async updateMunicipalityStatus(munId, patch) {
+    try {
+      const res = await apiFetch(`/api/admin/municipalities/${encodeURIComponent(munId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch)
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // fallback
+    }
+    return patch;
+  },
+
   async updateCitizenStatus(citizenId, patch) {
     try {
       const res = await apiFetch(`/api/admin/citizens/${encodeURIComponent(citizenId)}/status`, {

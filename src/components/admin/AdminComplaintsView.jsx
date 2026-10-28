@@ -40,6 +40,8 @@ export default function AdminComplaintsView({
   const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false);
   const [bulkDepartment, setBulkDepartment] = useState('Public Works & Roads (PWD)');
   const [bulkStatus, setBulkStatus] = useState('In Progress');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const filteredComplaints = useMemo(() => {
     return complaints.filter((c) => {
@@ -517,53 +519,66 @@ export default function AdminComplaintsView({
         <div className="px-5 py-3.5 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
           <div>
             Showing <strong className="text-slate-900">1–{filteredComplaints.length}</strong> of{' '}
-            <strong className="text-slate-900 tabular-nums">12,845</strong> complaints
+            <strong className="text-slate-900 tabular-nums">
+              {(12845 + Math.max(0, complaints.length - 7)).toLocaleString()}
+            </strong>{' '}
+            complaints
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span>Rows per page:</span>
-              <select className="px-2 py-1 rounded-lg border border-slate-200 text-slate-700 font-semibold bg-white">
-                <option>25</option>
-                <option>50</option>
-                <option>100</option>
+              <select
+                value={rowsPerPage}
+                onChange={(e) => {
+                  setRowsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="px-2 py-1 rounded-lg border border-slate-200 text-slate-700 font-semibold bg-white cursor-pointer"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
               </select>
             </div>
 
             <div className="flex items-center gap-1">
               <button
                 type="button"
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                 className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <button
-                type="button"
-                className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold cursor-pointer"
-              >
-                1
-              </button>
-              <button
-                type="button"
-                className="w-8 h-8 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
-              >
-                2
-              </button>
-              <button
-                type="button"
-                className="w-8 h-8 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
-              >
-                3
-              </button>
+              {[1, 2, 3].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setCurrentPage(p)}
+                  className={`w-8 h-8 rounded-lg font-bold cursor-pointer ${
+                    currentPage === p
+                      ? 'bg-blue-600 text-white'
+                      : 'border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
               <span className="px-1">...</span>
               <button
                 type="button"
-                className="px-2 h-8 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold tabular-nums cursor-pointer"
+                onClick={() => setCurrentPage(1835)}
+                className={`px-2 h-8 rounded-lg font-semibold tabular-nums cursor-pointer ${
+                  currentPage === 1835
+                    ? 'bg-blue-600 text-white'
+                    : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
               >
                 1,835
               </button>
               <button
                 type="button"
+                onClick={() => setCurrentPage(currentPage + 1)}
                 className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
