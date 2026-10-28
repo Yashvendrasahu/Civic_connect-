@@ -2742,9 +2742,24 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Civic Connect Full-Stack Server running at http://0.0.0.0:${PORT}`);
-  });
+  const tryListen = (portToTry) => {
+    const serverInstance = app.listen(portToTry, '0.0.0.0', () => {
+      console.log(`🚀 Civic Connect Full-Stack Server running at http://localhost:${portToTry}`);
+      console.log(`🔐 Super Admin Console: http://localhost:${portToTry}/civic-connect/admin/login`);
+    });
+
+    serverInstance.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        const nextPort = Number(portToTry) + 1;
+        console.warn(`⚠️ Port ${portToTry} is already in use. Automatically switching to Port ${nextPort}...`);
+        tryListen(nextPort);
+      } else {
+        console.error('Server error:', err);
+      }
+    });
+  };
+
+  tryListen(PORT);
 }
 
 if (!isVercel) {
