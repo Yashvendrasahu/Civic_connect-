@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
+const isVercel = Boolean(process.env.VERCEL);
 
 // ----------------------------------------------------------------------------
 // NATIVE SUPABASE BaaS CONFIGURATION (ANON KEY + USER JWT FORWARDING ONLY)
@@ -69,13 +70,28 @@ function getSupabaseClient(req) {
   return supabaseAnonClient;
 }
 
+// Enable CORS so Frontend on Vercel can call Backend on Render seamlessly
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // ----------------------------------------------------------------------------
 // PERSISTENT ENGINE STATE (Synced with Supabase Cloud when configured)
+// Uses /tmp on Vercel Serverless where /var/task is read-only
 // ----------------------------------------------------------------------------
-const DB_FILE = path.join(__dirname, 'server_db.json');
+const DB_FILE = isVercel
+  ? path.join(os.tmpdir(), 'server_db.json')
+  : path.join(__dirname, 'server_db.json');
 
 const DEFAULT_NOTIFICATION_PREFS = {
   status: { inApp: true, email: true, sms: true },
@@ -2670,10 +2686,11 @@ app.patch('/api/admin/complaints/:id/dossier', optionalAuth, (req, res) => {
 });
 
 // ============================================================================
-// FRONTEND SERVING & VITE INTEGRATION
+// FRONTEND SERVING & VITE INTEGRATION (Skipped on Vercel Serverless)
 // ============================================================================
 async function startServer() {
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -2681,9 +2698,21 @@ async function startServer() {
     app.use(vite.middlewares);
     console.log('⚡ Vite dev middleware mounted in Express app');
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const distPath = path.resolve(__dirname, 'dist');
+    const indexHtmlPath = path.resolve(distPath, 'index.html');
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
     app.get('*', (req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      if (fs.existsSync(indexHtmlPath)) {
+        res.sendFile(indexHtmlPath);
+      } else {
+        res.json({
+          status: 'ok',
+          service: 'Civic Connect Express + Native Supabase API (Render Backend)',
+          endpoints: ['/api/health', '/api/complaints', '/api/auth/login', '/api/admin/login']
+        });
+      }
     });
   }
 
@@ -2692,4 +2721,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!isVercel) {
+  startServer();
+}
+
+export default app;

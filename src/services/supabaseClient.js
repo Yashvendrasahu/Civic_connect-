@@ -87,6 +87,15 @@ export function saveStoredToken(token) {
   }
 }
 
+// Base URL for Backend API (Used when Frontend is on Vercel and Backend is on Render)
+const API_BASE_URL = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_BACKEND_URL ||
+  ''
+)
+  .trim()
+  .replace(/\/$/, '');
+
 // Authenticated Fetch Helper for Express Backend (/api/*)
 async function apiFetch(endpoint, options = {}) {
   const token = getStoredToken();
@@ -97,7 +106,12 @@ async function apiFetch(endpoint, options = {}) {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  return fetch(endpoint, {
+  const fullUrl =
+    endpoint.startsWith('http://') || endpoint.startsWith('https://')
+      ? endpoint
+      : `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+
+  return fetch(fullUrl, {
     ...options,
     headers
   });
