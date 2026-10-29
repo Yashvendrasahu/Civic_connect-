@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
+import { civicDataService } from '../services/supabaseClient.js';
 import {
   X,
   Camera,
@@ -12,7 +13,8 @@ import {
   Cpu,
   Layers,
   ArrowRight,
-  Eye
+  Eye,
+  Navigation
 } from 'lucide-react';
 
 const PRESET_ISSUES = [
@@ -80,10 +82,35 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
   const [customTitle, setCustomTitle] = useState(PRESET_ISSUES[0].title);
   const [customCategory, setCustomCategory] = useState(PRESET_ISSUES[0].category);
   const [customLocation, setCustomLocation] = useState(PRESET_ISSUES[0].location);
+  const [customGeo, setCustomGeo] = useState(PRESET_ISSUES[0].geo);
+  const [customWard, setCustomWard] = useState('Ward 18, Zone 4');
   const [customDescription, setCustomDescription] = useState(PRESET_ISSUES[0].description);
   const [customImage, setCustomImage] = useState(PRESET_ISSUES[0].image);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(100);
+  const [isLocating, setIsLocating] = useState(false);
+
+  const handleAutoLocate = async () => {
+    setIsLocating(true);
+    try {
+      const loc = await civicDataService.detectUserLocation();
+      if (loc) {
+        setCustomLocation(loc.shortLocation || loc.address || customLocation);
+        setCustomGeo(loc.geo || customGeo);
+        setCustomWard(loc.ward || customWard);
+      }
+    } catch (e) {
+      // ignore
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      handleAutoLocate();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -138,7 +165,8 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
       title: customTitle,
       category: customCategory,
       location: customLocation,
-      geo: selectedPreset.geo || '22.7196° N, 75.8577° E',
+      ward: customWard,
+      geo: customGeo || selectedPreset.geo || '22.7196° N, 75.8577° E',
       priority: selectedPreset.priority || 'High',
       severityLevel: selectedPreset.severityLevel || 'Level 4 (High)',
       department: selectedPreset.department || 'Road & Transport Directorate',
@@ -296,10 +324,21 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Location & Landmark</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">Location & Landmark (Auto-GPS)</label>
+                  <button
+                    type="button"
+                    onClick={handleAutoLocate}
+                    disabled={isLocating}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    <Navigation className={`w-3 h-3 ${isLocating ? 'animate-spin' : ''}`} />
+                    <span>{isLocating ? 'Locating...' : 'Auto-Detect'}</span>
+                  </button>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <MapPin className="w-3.5 h-3.5" />
+                    <MapPin className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                   <input
                     type="text"
@@ -307,6 +346,9 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
                     onChange={(e) => setCustomLocation(e.target.value)}
                     className="w-full pl-8 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900"
                   />
+                </div>
+                <div className="text-[10px] font-mono text-slate-500 mt-1">
+                  GPS: {customGeo} • {customWard}
                 </div>
               </div>
             </div>

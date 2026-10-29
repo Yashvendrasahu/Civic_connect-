@@ -11,6 +11,7 @@ import TicketDetailModal from './components/TicketDetailModal.jsx';
 import CertificateModal from './components/CertificateModal.jsx';
 import AdminLoginPage from './components/admin/AdminLoginPage.jsx';
 import AdminDashboard from './components/admin/AdminDashboard.jsx';
+import CivicAiAssistant from './components/CivicAiAssistant.jsx';
 import { civicDataService } from './services/supabaseClient.js';
 import { CheckCircle2, ShieldCheck, Phone, FileText, X } from 'lucide-react';
 
@@ -467,6 +468,14 @@ export default function App() {
         onClose={() => setIsCertificateModalOpen(false)}
         user={currentUser}
         complaints={complaints}
+      />
+
+      {/* Global Multi-Turn Supabase RAG + Google Maps Grounding AI Assistant */}
+      <CivicAiAssistant
+        currentUser={currentUser}
+        complaints={complaints}
+        onSelectTicket={(ticket) => setSelectedTicket(ticket)}
+        onNavigate={handleNavigate}
       />
 
       {/* Official Governance, Privacy, Terms & Citizen Support Modal */}

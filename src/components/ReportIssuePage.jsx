@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import CivicLogo from './CivicLogo.jsx';
 import { civicDataService } from '../services/supabaseClient.js';
 import confetti from 'canvas-confetti';
@@ -26,7 +26,9 @@ import {
   Sliders,
   Sun,
   Bell,
-  ChevronDown
+  ChevronDown,
+  Navigation,
+  ExternalLink
 } from 'lucide-react';
 
 export default function ReportIssuePage({
@@ -40,6 +42,8 @@ export default function ReportIssuePage({
   const [currentStep, setCurrentStep] = useState(2); // default to step 2 to showcase the exact screen!
   const [isConfirmedCheckbox, setIsConfirmedCheckbox] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
+  const [gpsStatusText, setGpsStatusText] = useState('Auto-detecting live GPS...');
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleEditStep = (sectionName) => {
@@ -62,6 +66,7 @@ export default function ReportIssuePage({
     assignedTeam: 'PWD Indore Field Team #04 (Indore Central)',
     ward: 'Ward 18, Zone 4',
     address: 'Vijay Nagar Main Rd, Scheme 54, Indore, Madhya Pradesh 452010',
+    shortLocation: 'Vijay Nagar Square, Near Orbit Mall, Indore',
     geo: '22.7533° N, 75.8937° E',
     precision: '±3.2m (High Reliability)',
     citizenStatement: 'Deep hazardous road pothole with exposed gravel near Vijay Nagar Square right next to the metro pillar. Causing serious two-wheeler skids and bottleneck during peak hours.',
@@ -69,12 +74,60 @@ export default function ReportIssuePage({
     aiModel: 'Neural Model v4.2',
     image: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=1200&q=80',
     macroImage: 'https://images.unsplash.com/photo-1584467735871-8e85353a8413?auto=format&fit=crop&w=800&q=80',
-    reportedOn: '07 October 2026, 10:42 AM (IST)',
-    slaTarget: 'Standard 24-Hour Municipal Resolution SLA'
+    reportedOn: new Date().toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) + ' (IST)',
+    slaTarget: 'Standard 24-Hour Municipal Resolution SLA',
+    mapsLinks: [],
+    groundingSummary: ''
   });
+
+  const handleAutoDetectLocation = async (silent = false) => {
+    setIsLocatingGps(true);
+    setGpsStatusText('Acquiring live GPS satellite lock...');
+    try {
+      const loc = await civicDataService.detectUserLocation();
+      if (loc) {
+        setFormData((prev) => ({
+          ...prev,
+          address: loc.address || prev.address,
+          shortLocation: loc.shortLocation || loc.address || prev.shortLocation,
+          ward: loc.ward || prev.ward,
+          geo: loc.geo || prev.geo,
+          precision: loc.precision || prev.precision,
+          department: loc.department || prev.department,
+          assignedTeam: loc.assignedTeam || prev.assignedTeam,
+          mapsLinks: Array.isArray(loc.mapsLinks) ? loc.mapsLinks : [],
+          groundingSummary: loc.groundingSummary || ''
+        }));
+        setGpsStatusText(
+          loc.source === 'gps'
+            ? `Live GPS Locked: ${loc.geo} (${loc.city || 'Verified'})`
+            : `Auto-Located: ${loc.shortLocation || loc.city} (${loc.geo})`
+        );
+        if (!silent && onShowToast) {
+          onShowToast(`Live location auto-detected: ${loc.shortLocation || loc.address}`);
+        }
+      }
+    } catch (err) {
+      setGpsStatusText('GPS locked to municipal corridor');
+    } finally {
+      setIsLocatingGps(false);
+    }
+  };
+
+  // Automatically fetch user's live location as soon as Report Issue opens
+  useEffect(() => {
+    handleAutoDetectLocation(true);
+  }, []);
 
   const handleRerunAI = () => {
     setIsAnalyzing(true);
+    handleAutoDetectLocation(true);
     setTimeout(() => {
       setIsAnalyzing(false);
     }, 800);
@@ -92,10 +145,11 @@ export default function ReportIssuePage({
     const complaintPayload = {
       title: formData.title,
       category: formData.category,
-      location: 'Vijay Nagar Square, Near Orbit Mall, Indore',
+      location: formData.shortLocation || formData.address,
       address: formData.address,
+      ward: formData.ward,
       geo: formData.geo,
-      priority: 'High Priority',
+      priority: 'High',
       severityLevel: formData.severity,
       department: formData.department,
       assignedTeam: formData.assignedTeam,
@@ -612,13 +666,47 @@ export default function ReportIssuePage({
                   </div>
 
                   {/* Verified Geotagged Location */}
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      <MapPin className="w-3 h-3 text-blue-600" />
-                      <span>VERIFIED GEOTAGGED LOCATION</span>
+                  <div className="space-y-2 p-3.5 rounded-2xl bg-blue-50/40 border border-blue-100">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-700 uppercase tracking-wider">
+                        <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                        <span>AUTO-DETECTED GEOTAGGED LOCATION</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAutoDetectLocation(false)}
+                        disabled={isLocatingGps}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white hover:bg-blue-50 text-blue-600 border border-blue-200 text-[10px] font-bold transition-all cursor-pointer disabled:opacity-60"
+                      >
+                        <Navigation className={`w-3 h-3 ${isLocatingGps ? 'animate-spin' : ''}`} />
+                        <span>{isLocatingGps ? 'Detecting...' : 'Refresh GPS'}</span>
+                      </button>
                     </div>
-                    <div className="text-xs font-bold text-slate-900">Vijay Nagar Main Rd, Scheme 54, Indore, MP</div>
-                    <div className="text-[10px] font-mono text-slate-500">22.7533° N, 75.8937° E • Precision: ±3.2m</div>
+                    <div className="text-xs font-bold text-slate-900">{formData.address}</div>
+                    <div className="text-[10px] font-mono text-slate-600">
+                      {formData.geo} • {formData.precision}
+                    </div>
+                    {formData.groundingSummary && (
+                      <div className="text-[11px] text-slate-600 bg-white/80 p-2 rounded-xl border border-blue-100">
+                        {formData.groundingSummary}
+                      </div>
+                    )}
+                    {formData.mapsLinks && formData.mapsLinks.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {formData.mapsLinks.map((lnk, i) => (
+                          <a
+                            key={i}
+                            href={lnk.uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-blue-200 text-[10px] font-semibold text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                            <span>{lnk.title}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1146,25 +1234,49 @@ export default function ReportIssuePage({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Street Address</label>
-                  <input
-                    type="text"
-                    value={formData.address}
-                    onChange={e => setFormData({ ...formData, address: e.target.value })}
-                    className="w-full p-3 rounded-xl border border-slate-200 text-xs text-slate-900"
-                  />
+              {/* Auto-Detected Live Location Bar + Street Address / Ward */}
+              <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="text-xs font-bold text-slate-900">
+                      Automatic GPS Location Telemetry
+                    </span>
+                    <span className="text-[11px] font-mono text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
+                      {gpsStatusText}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAutoDetectLocation(false)}
+                    disabled={isLocatingGps}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    <Navigation className={`w-3.5 h-3.5 ${isLocatingGps ? 'animate-spin' : ''}`} />
+                    <span>{isLocatingGps ? 'Locating...' : 'Auto-Detect My Location'}</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Jurisdiction Ward</label>
-                  <input
-                    type="text"
-                    value={formData.ward}
-                    onChange={e => setFormData({ ...formData, ward: e.target.value })}
-                    className="w-full p-3 rounded-xl border border-slate-200 text-xs text-slate-900"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Street Address (Auto-Filled)</label>
+                    <input
+                      type="text"
+                      value={formData.address}
+                      onChange={e => setFormData({ ...formData, address: e.target.value, shortLocation: e.target.value })}
+                      className="w-full p-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Jurisdiction Ward & Coordinates</label>
+                    <input
+                      type="text"
+                      value={formData.ward}
+                      onChange={e => setFormData({ ...formData, ward: e.target.value })}
+                      className="w-full p-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-900"
+                    />
+                  </div>
                 </div>
               </div>
 

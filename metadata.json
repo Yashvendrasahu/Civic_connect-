@@ -1,7 +1,7 @@
 {
   "name": "Civic Connect - Civic Issue Reporting & Resolution System",
   "description": "Smart AI-powered civic issue reporting and municipal resolution platform connecting citizens, intelligent routing, and public administrations.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
 

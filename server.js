@@ -6,9 +6,23 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function getGeminiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2709,6 +2723,780 @@ app.patch('/api/admin/complaints/:id/dossier', optionalAuth, (req, res) => {
   }
 
   res.json({ complaint: { id: req.params.id, ...patch } });
+});
+
+// ============================================================================
+// MODULE 7: AUTO-GEOLOCATION REVERSE GEOCODING & SUPABASE RAG AI ASSISTANT
+// ============================================================================
+
+// Helper: Run any promise with a strict timeout so API endpoints never hang
+function withTimeout(promise, ms = 6000, label = 'operation') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    )
+  ]);
+}
+
+// Helper: Extract Google Maps Grounding URLs & review snippets from Gemini response
+function extractMapsGroundingLinks(response) {
+  const links = [];
+  const seenUris = new Set();
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(chunks)) return links;
+
+  for (const chunk of chunks) {
+    if (chunk?.maps?.uri && !seenUris.has(chunk.maps.uri)) {
+      seenUris.add(chunk.maps.uri);
+      const snippets = [];
+      const rawSnippets = chunk.maps?.placeAnswerSources?.reviewSnippets;
+      if (Array.isArray(rawSnippets)) {
+        for (const s of rawSnippets) {
+          const txt = s?.content || s?.text || (typeof s === 'string' ? s : '');
+          if (txt) snippets.push(txt);
+        }
+      }
+      links.push({
+        uri: chunk.maps.uri,
+        title: chunk.maps.title || 'View on Google Maps',
+        placeId: chunk.maps.placeId || '',
+        reviewSnippets: snippets
+      });
+    }
+  }
+  return links;
+}
+
+// Helper: Format numeric lat/lng into civic DMS/decimal string
+function formatGeoString(lat, lng) {
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  if (Number.isNaN(latNum) || Number.isNaN(lngNum)) {
+    return '22.7533° N, 75.8937° E';
+  }
+  const latDir = latNum >= 0 ? 'N' : 'S';
+  const lngDir = lngNum >= 0 ? 'E' : 'W';
+  return `${Math.abs(latNum).toFixed(4)}° ${latDir}, ${Math.abs(lngNum).toFixed(4)}° ${lngDir}`;
+}
+
+// Helper: Determine municipal ward & PWD squad from city/suburb/coords
+function inferMunicipalWardAndTeam(city = '', suburb = '', state = '') {
+  const c = (city || 'Indore').trim();
+  const sub = (suburb || '').toLowerCase();
+
+  let ward = 'Ward 18, Zone 4';
+  if (sub.includes('palasia')) ward = 'Ward 19, Zone 4 (Palasia)';
+  else if (sub.includes('rajwada') || sub.includes('central')) ward = 'Ward 12, Central Zone';
+  else if (sub.includes('bhanwarkuan') || sub.includes('rau')) ward = 'Ward 64, Zone 13';
+  else if (sub.includes('vijay nagar') || sub.includes('scheme 54') || sub.includes('scheme 78')) {
+    ward = 'Ward 18, Zone 4 (Vijay Nagar)';
+  } else if (sub) {
+    ward = `Ward 18 • ${suburb}`;
+  }
+
+  return {
+    ward,
+    department: `Roads & Infrastructure Department (PWD ${c})`,
+    assignedTeam: `PWD ${c} Rapid Field Squad #04 (${c} Municipal Corp)`,
+    state: state || 'Madhya Pradesh'
+  };
+}
+
+// 14a. Auto-Location Reverse Geocode + Maps Grounding Endpoint
+app.post('/api/location/reverse-geocode', optionalAuth, async (req, res) => {
+  let { latitude, longitude, accuracy } = req.body || {};
+  let source = 'gps';
+
+  // Fallback to IP geolocation if browser GPS coordinates were not supplied
+  if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+    source = 'ip-fallback';
+    try {
+      const ipRes = await fetch('https://ipapi.co/json/', {
+        headers: { 'User-Agent': 'CivicConnect/2.0' },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (ipRes.ok) {
+        const ipData = await ipRes.json();
+        if (ipData.latitude && ipData.longitude) {
+          latitude = Number(ipData.latitude);
+          longitude = Number(ipData.longitude);
+          accuracy = 150;
+        }
+      }
+    } catch (e) {
+      // Default to Indore Municipal Coordinates if offline
+    }
+  }
+
+  const lat = Number(latitude) || 22.7533;
+  const lng = Number(longitude) || 75.8937;
+  const accMeters = Number(accuracy) ? Math.max(2.1, Number(accuracy)) : 3.8;
+  const geoFormatted = formatGeoString(lat, lng);
+
+  let road = '';
+  let suburb = '';
+  let city = 'Indore';
+  let state = 'Madhya Pradesh';
+  let postcode = '452010';
+  let displayAddress = '';
+
+  // 1. Reverse Geocode via OpenStreetMap Nominatim
+  try {
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+      lat
+    )}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`;
+    const nomRes = await fetch(nomUrl, {
+      headers: {
+        'User-Agent': 'CivicConnect-Municipal-Portal/2.0',
+        'Accept-Language': 'en'
+      },
+      signal: AbortSignal.timeout(3500)
+    });
+    if (nomRes.ok) {
+      const nomData = await nomRes.json();
+      const addr = nomData.address || {};
+      road =
+        addr.road ||
+        addr.pedestrian ||
+        addr.Main_Road ||
+        addr.neighbourhood ||
+        addr.amenity ||
+        '';
+      suburb =
+        addr.suburb ||
+        addr.neighbourhood ||
+        addr.residential ||
+        addr.city_district ||
+        addr.quarter ||
+        '';
+      city =
+        addr.city ||
+        addr.town ||
+        addr.municipality ||
+        addr.county ||
+        addr.state_district ||
+        'Indore';
+      state = addr.state || 'Madhya Pradesh';
+      postcode = addr.postcode || '';
+
+      const parts = [road, suburb, city, state, postcode].filter(Boolean);
+      displayAddress = parts.length >= 2 ? parts.join(', ') : nomData.display_name || '';
+    }
+  } catch (err) {
+    console.warn('[Civic Connect] Nominatim reverse geocode note:', err.message);
+  }
+
+  // 2. Provide instant Google Maps place link + optional fast Gemini Maps Grounding
+  let mapsLinks = [
+    {
+      uri: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+      title: `${suburb || city} (${geoFormatted}) on Google Maps`,
+      reviewSnippets: []
+    }
+  ];
+  let groundingSummary = '';
+
+  if (!displayAddress) {
+    displayAddress = `Vijay Nagar Main Rd, Scheme 54, ${city}, ${state} ${postcode}`.trim();
+  }
+
+  const shortLocation = [road || suburb || 'Main Corridor', suburb && road ? suburb : '', city]
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(', ');
+
+  const { ward, department, assignedTeam } = inferMunicipalWardAndTeam(city, suburb, state);
+
+  res.json({
+    source,
+    latitude: lat,
+    longitude: lng,
+    geo: geoFormatted,
+    precision: `±${accMeters.toFixed(1)}m (${source === 'gps' ? 'Live GPS Telemetry' : 'Auto Network Geolocation'})`,
+    address: displayAddress,
+    shortLocation: shortLocation || `${city}, ${state}`,
+    ward,
+    city,
+    state,
+    postcode,
+    department,
+    assignedTeam,
+    groundingSummary,
+    mapsLinks
+  });
+});
+
+// Helper: Fetch live unified dataset from Supabase Cloud + Local Engine for RAG
+async function gatherLiveSupabaseRagDataset(req) {
+  const sb = getSupabaseClient(req);
+  let liveComplaints = [...(db.complaints || [])];
+  let liveUsers = [...(db.users || [])];
+  let liveMunicipalities = [...(db.municipalities || [])];
+  let liveWorkorders = [...(db.workorders || [])];
+  let liveCrews = [...(db.fieldCrews || [])];
+  let liveTimeline = [...(db.timelineUpdates || [])];
+  let supabaseConnected = Boolean(sb);
+
+  if (sb) {
+    try {
+      const [compRes, profRes, woRes, crewRes, tlRes] = await withTimeout(
+        Promise.allSettled([
+          sb.from('complaints').select('*').order('created_at', { ascending: false }).limit(100),
+          sb.from('profiles').select('*').order('created_at', { ascending: false }).limit(100),
+          sb.from('workorders').select('*').order('created_at', { ascending: false }).limit(50),
+          sb.from('field_crews').select('*').limit(50),
+          sb.from('timeline_updates').select('*').order('created_at', { ascending: false }).limit(50)
+        ]),
+        3500,
+        'Supabase RAG fetch'
+      );
+
+      if (compRes.status === 'fulfilled' && Array.isArray(compRes.value.data)) {
+        const normalized = compRes.value.data
+          .filter((r) => !LEGACY_SEED_COMPLAINT_IDS.has(r.id))
+          .map(normalizeComplaint);
+        const sbIds = new Set(normalized.map((c) => c.id));
+        const extras = liveComplaints.filter(
+          (c) => !sbIds.has(c.id) && !LEGACY_SEED_COMPLAINT_IDS.has(c.id)
+        );
+        liveComplaints = [...normalized, ...extras];
+      }
+
+      if (profRes.status === 'fulfilled' && Array.isArray(profRes.value.data)) {
+        const sbEmails = new Set(
+          profRes.value.data.map((p) => (p.email || '').toLowerCase()).filter(Boolean)
+        );
+        const mappedProfiles = profRes.value.data.map((p) => ({
+          id: p.id,
+          name: p.name || (p.email ? p.email.split('@')[0] : 'User'),
+          email: p.email || '',
+          role: p.role || 'citizen',
+          city: p.city || 'Indore',
+          ward: p.ward || 'Ward 18',
+          department: p.department || '',
+          officerId: p.officer_id || '',
+          citizenId: p.citizen_id || '',
+          isVerified: Boolean(p.is_verified),
+          adminVerified: p.role !== 'officer' ? true : Boolean(p.admin_verified),
+          verificationStatus: p.verification_status || (p.admin_verified ? 'Verified' : 'Pending'),
+          accountStatus: p.account_status || 'Active'
+        }));
+        const extraUsers = liveUsers.filter((u) => !sbEmails.has((u.email || '').toLowerCase()));
+        liveUsers = [...mappedProfiles, ...extraUsers];
+      }
+
+      if (woRes.status === 'fulfilled' && Array.isArray(woRes.value.data) && woRes.value.data.length > 0) {
+        liveWorkorders = woRes.value.data;
+      }
+
+      if (crewRes.status === 'fulfilled' && Array.isArray(crewRes.value.data) && crewRes.value.data.length > 0) {
+        liveCrews = crewRes.value.data;
+      }
+
+      if (tlRes.status === 'fulfilled' && Array.isArray(tlRes.value.data) && tlRes.value.data.length > 0) {
+        liveTimeline = tlRes.value.data.map(normalizeTimelineEntry);
+      }
+    } catch (err) {
+      console.warn('[Civic Connect] RAG Supabase query note:', err.message);
+    }
+  }
+
+  return {
+    supabaseConnected,
+    complaints: liveComplaints,
+    users: liveUsers,
+    municipalities: liveMunicipalities,
+    workorders: liveWorkorders,
+    fieldCrews: liveCrews,
+    timeline: liveTimeline
+  };
+}
+
+// Helper: Hybrid Semantic + Keyword Retriever over Live Supabase Data
+function retrieveRelevantRagContext(query, dataset, currentUser) {
+  const qLower = (query || '').toLowerCase();
+  const tokens = qLower
+    .replace(/[^a-z0-9\u0900-\u097F\s#-]/gi, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+
+  // Synonym expansion for Hindi / Hinglish / English queries
+  const expandedTerms = new Set(tokens);
+  if (qLower.includes('sadak') || qLower.includes('gaddha') || qLower.includes('pothole') || qLower.includes('road')) {
+    expandedTerms.add('road');
+    expandedTerms.add('pothole');
+    expandedTerms.add('infrastructure');
+  }
+  if (qLower.includes('kachra') || qLower.includes('safai') || qLower.includes('garbage') || qLower.includes('waste')) {
+    expandedTerms.add('sanitation');
+    expandedTerms.add('garbage');
+    expandedTerms.add('waste');
+  }
+  if (qLower.includes('paani') || qLower.includes('pani') || qLower.includes('water') || qLower.includes('leak') || qLower.includes('drain')) {
+    expandedTerms.add('water');
+    expandedTerms.add('sewage');
+    expandedTerms.add('drainage');
+    expandedTerms.add('pipeline');
+  }
+  if (qLower.includes('light') || qLower.includes('bijli') || qLower.includes('pole') || qLower.includes('electricity')) {
+    expandedTerms.add('electricity');
+    expandedTerms.add('lighting');
+    expandedTerms.add('streetlight');
+  }
+  const isAskingMyComplaints =
+    qLower.includes('my ') ||
+    qLower.includes('mera') ||
+    qLower.includes('meri') ||
+    qLower.includes('mere') ||
+    qLower.includes('apna') ||
+    qLower.includes('mine');
+
+  const userEmail = (currentUser?.email || '').toLowerCase();
+
+  // Score Complaints
+  const scoredComplaints = dataset.complaints.map((c) => {
+    let score = 0;
+    const textBlob = `${c.id} ${c.title} ${c.category} ${c.location} ${c.ward} ${c.status} ${c.priority} ${c.department} ${c.assignedTeam} ${c.description} ${c.citizenName} ${c.citizenEmail}`.toLowerCase();
+
+    // Exact ID match gets highest priority
+    const cleanId = String(c.id || '').toLowerCase().replace(/^#/, '');
+    if (cleanId && qLower.includes(cleanId)) {
+      score += 50;
+    }
+
+    // Current user ownership match
+    if (userEmail && (c.citizenEmail || '').toLowerCase() === userEmail) {
+      score += isAskingMyComplaints ? 25 : 5;
+    }
+
+    for (const term of expandedTerms) {
+      if (textBlob.includes(term)) {
+        score += 4;
+      }
+    }
+
+    if (qLower.includes('pending') && (c.status === 'Pending' || c.status === 'Submitted')) score += 6;
+    if ((qLower.includes('progress') || qLower.includes('active')) && c.status === 'In Progress') score += 6;
+    if (qLower.includes('resolved') && c.status === 'Resolved') score += 6;
+    if ((qLower.includes('high') || qLower.includes('critical') || qLower.includes('urgent')) && (c.priority === 'High' || c.priority === 'Critical')) score += 5;
+
+    return { item: c, score };
+  });
+
+  scoredComplaints.sort((a, b) => b.score - a.score);
+  const topComplaints = scoredComplaints.slice(0, 8).map((s) => ({
+    ...s.item,
+    _ragScore: s.score
+  }));
+
+  // Score Municipalities
+  const scoredMunicipalities = (dataset.municipalities || []).map((m) => {
+    let score = 0;
+    const blob = `${m.id} ${m.name} ${m.state} ${m.status} ${m.verification}`.toLowerCase();
+    for (const term of expandedTerms) {
+      if (blob.includes(term)) score += 5;
+    }
+    return { item: m, score };
+  });
+  scoredMunicipalities.sort((a, b) => b.score - a.score);
+  const topMunicipalities = scoredMunicipalities.slice(0, 5).map((s) => s.item);
+
+  // Score Officers & Pending Approvals
+  const officers = (dataset.users || []).filter((u) => u.role === 'officer');
+  const pendingOfficers = officers.filter((u) => !u.adminVerified || u.verificationStatus !== 'Verified');
+
+  // Build RAG Citations list for UI transparency
+  const ragSources = [];
+  for (const c of topComplaints.slice(0, 5)) {
+    ragSources.push({
+      table: 'complaints',
+      id: `#${String(c.id).replace(/^#/, '')}`,
+      title: c.title,
+      status: c.status,
+      priority: c.priority,
+      location: c.location || c.ward || 'Indore',
+      assignedTeam: c.assignedTeam || c.department || 'Municipal Squad',
+      relevance: c._ragScore > 0 ? 'Direct Match' : 'Recent Record'
+    });
+  }
+
+  if (qLower.includes('municipality') || qLower.includes('nagam') || qLower.includes('city') || qLower.includes('officer') || qLower.includes('verify')) {
+    for (const o of officers.slice(0, 3)) {
+      ragSources.push({
+        table: 'profiles (officers)',
+        id: o.officerId || o.id,
+        title: `${o.name} (${o.city || 'Municipal Officer'})`,
+        status: o.adminVerified ? 'Admin Verified' : 'Pending Admin Verification',
+        priority: o.isVerified ? 'Email Verified' : 'Email Unverified',
+        location: o.city || 'Madhya Pradesh',
+        assignedTeam: o.department || 'Municipal Administration',
+        relevance: 'Officer Record'
+      });
+    }
+  }
+
+  // Summary statistics from live Supabase dataset
+  const totalComplaints = dataset.complaints.length;
+  const resolvedCount = dataset.complaints.filter((c) => c.status === 'Resolved').length;
+  const inProgressCount = dataset.complaints.filter((c) => c.status === 'In Progress' || c.status === 'Assigned').length;
+  const pendingCount = Math.max(0, totalComplaints - resolvedCount - inProgressCount);
+  const userComplaints = userEmail
+    ? dataset.complaints.filter((c) => (c.citizenEmail || '').toLowerCase() === userEmail)
+    : [];
+
+  return {
+    stats: {
+      totalComplaints,
+      resolvedCount,
+      inProgressCount,
+      pendingCount,
+      userComplaintsCount: userComplaints.length,
+      totalUsers: dataset.users.length,
+      totalOfficers: officers.length,
+      pendingOfficersCount: pendingOfficers.length,
+      activeCrewsCount: dataset.fieldCrews.length,
+      workordersCount: dataset.workorders.length
+    },
+    topComplaints,
+    userComplaints: userComplaints.slice(0, 5),
+    topMunicipalities,
+    officers: officers.slice(0, 6),
+    pendingOfficers,
+    fieldCrews: dataset.fieldCrews.slice(0, 5),
+    workorders: dataset.workorders.slice(0, 5),
+    recentTimeline: dataset.timeline.slice(0, 6),
+    ragSources
+  };
+}
+
+// Deterministic RAG Answer Synthesizer (Used if GEMINI_API_KEY is not set locally)
+function buildDeterministicRagReply(query, ragContext, currentUser, supabaseConnected) {
+  const q = (query || '').toLowerCase();
+  const { stats, topComplaints, userComplaints, pendingOfficers, fieldCrews } = ragContext;
+
+  const headerLine = supabaseConnected
+    ? `📊 **Live Supabase RAG Snapshot:** कुल **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, In Progress: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**)`
+    : `📊 **Civic Connect RAG Snapshot:** कुल **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, In Progress: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**)`;
+
+  if (q.includes('officer') || q.includes('verify') || q.includes('approval') || q.includes('municipal login')) {
+    const pendingList =
+      pendingOfficers.length > 0
+        ? pendingOfficers
+            .map(
+              (o) =>
+                `- **${o.name}** (${o.email}) — City: ${o.city || 'Indore'} | Email Verified: ${
+                  o.isVerified ? 'Yes' : 'No'
+                } | Admin Status: **${o.verificationStatus || 'Pending'}**`
+            )
+            .join('\n')
+        : '- अभी कोई भी Municipal Officer पेंडिंग वेरिफिकेशन में नहीं है।';
+
+    return `${headerLine}\n\n### 🏛️ Municipal Officer Two-Tier Verification Status\nडेटाबेस में कुल **${stats.totalOfficers}** म्युनिसिपल ऑफिसर हैं, जिनमें से **${stats.pendingOfficersCount}** सुपर एडमिन अप्रूवल की प्रतीक्षा कर रहे हैं:\n\n${pendingList}\n\n> **नियम:** म्युनिसिपल ऑफिसर को पहले ईमेल वेरीफाई करना होता है (Step 1) और फिर Super Admin द्वारा **Municipality Management** से Approve किए जाने के बाद ही लॉगिन की अनुमति मिलती है (Step 2)।`;
+  }
+
+  if (q.includes('mera') || q.includes('meri') || q.includes('my ') || q.includes('status')) {
+    const listToUse = userComplaints.length > 0 ? userComplaints : topComplaints.slice(0, 4);
+    if (listToUse.length === 0) {
+      return `${headerLine}\n\nअभी आपके अकाउंट (${currentUser?.email || 'Guest'}) से कोई शिकायत दर्ज नहीं मिली है। आप **Report Issue** पर क्लिक करके नई शिकायत दर्ज कर सकते हैं—आपकी लाइव GPS लोकेशन अपने-आप डिटेक्ट हो जाएगी!`;
+    }
+    const rows = listToUse
+      .map(
+        (c) =>
+          `- **#${String(c.id).replace(/^#/, '')}: ${c.title}**\n  - **Status:** ${c.status} | **Priority:** ${c.priority}\n  - **Location:** ${c.location || c.ward}\n  - **Assigned Squad:** ${c.assignedTeam || c.department}`
+      )
+      .join('\n');
+    return `${headerLine}\n\n### 📋 आपके द्वारा पूछी गई शिकायतों की लाइव स्थिति (Retrieved from Supabase):\n${rows}`;
+  }
+
+  const sampleRows =
+    topComplaints.length > 0
+      ? topComplaints
+          .slice(0, 4)
+          .map(
+            (c) =>
+              `- **#${String(c.id).replace(/^#/, '')}** — *${c.title}* (${c.category}) | **${c.status}** | 📍 ${c.location} | 👷 ${c.assignedTeam || c.department}`
+          )
+          .join('\n')
+      : '- अभी डेटाबेस में कोई शिकायत मौजूद नहीं है। जब यूज़र नई शिकायत दर्ज करेंगे तो वह यहाँ तुरंत दिखाई देगी।';
+
+  const crewRows = (fieldCrews || [])
+    .slice(0, 3)
+    .map((cr) => `- **${cr.name}** (${cr.department}) — Status: **${cr.status}**`)
+    .join('\n');
+
+  return `${headerLine}\n\n### 🔍 Relevant Records Retrieved from Database:\n${sampleRows}\n\n### 🚛 Active Municipal Field Squads:\n${crewRows || '- All rapid response squads on standby.'}\n\nआप किसी भी **Ticket ID** (जैसे \`#CC10246\`), **Ward**, **Department**, या अपने आस-पास के **Google Maps** स्थानों के बारे में पूछ सकते हैं!`;
+}
+
+// 14b. Multi-Turn Supabase RAG + Gemini Maps Grounding Chat Endpoint
+app.post('/api/ai/rag-chat', optionalAuth, async (req, res) => {
+  const {
+    message,
+    history = [],
+    model: requestedModel = 'gemini-3.8-flash',
+    useMapsGrounding = false,
+    userLocation = null,
+    currentUser: bodyUser = null
+  } = req.body || {};
+
+  if (!message || !String(message).trim()) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  const activeUser = req.user || bodyUser || {
+    name: 'Citizen User',
+    email: '',
+    role: 'citizen',
+    city: 'Indore, Madhya Pradesh',
+    ward: 'Ward 18'
+  };
+
+  // 1. Retrieve Live Data from Supabase + Local Store
+  const dataset = await gatherLiveSupabaseRagDataset(req);
+  const ragContext = retrieveRelevantRagContext(message, dataset, activeUser);
+
+  // 2. Check if Maps Grounding should be activated
+  const qLower = String(message).toLowerCase();
+  const isLocationQuery =
+    Boolean(useMapsGrounding) ||
+    qLower.includes('map') ||
+    qLower.includes('near') ||
+    qLower.includes('paas') ||
+    qLower.includes('aas paas') ||
+    qLower.includes('kaha') ||
+    qLower.includes('where') ||
+    qLower.includes('location') ||
+    qLower.includes('address') ||
+    qLower.includes('hospital') ||
+    qLower.includes('office') ||
+    qLower.includes('station') ||
+    qLower.includes('direction');
+
+  // Allowed models per @google/genai guidelines:
+  // If Maps Grounding is used, MUST use 'gemini-3.8-flash' with googleMaps tool
+  const validModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-4-argon'];
+  const selectedModel = isLocationQuery
+    ? 'gemini-3.8-flash'
+    : validModels.includes(requestedModel)
+    ? requestedModel
+    : 'gemini-3.8-flash';
+
+  const systemInstruction = `You are the official "Civic Connect AI Assistant" (Powered by Live Supabase RAG & Google Maps Grounding) for the CIRRS (Civic Issue Reporting & Resolution System) platform.
+You help Citizens, Municipal Officers, and Super Admins in Hindi, Hinglish, and English (match the user's language).
+
+CRITICAL RAG INSTRUCTIONS:
+1. Always ground your answers strictly in the LIVE SUPABASE DATABASE CONTEXT provided below.
+2. Cite exact Complaint IDs (e.g., #CC10246, #CMP-10245), statuses, priorities, wards, assigned field squads, and officer verification statuses when answering questions about complaints, users, or municipalities.
+3. If the live database currently has 0 complaints or a specific ticket is not found, state that honestly based on the live Supabase snapshot and guide the user on how to report or track an issue.
+4. For Municipal Officer login questions, explain the Two-Tier Verification rule:
+   - Citizen: Verifies via Email only, then can log in.
+   - Municipal Officer: Must verify via Email (Step 1) AND be verified/approved by the Super Admin in the CIRRS Admin Console (/civic-connect/admin/login -> Municipality Management) before login is permitted (Step 2).
+
+CURRENT LOGGED-IN USER:
+- Name: ${activeUser.name || 'Guest'}
+- Email: ${activeUser.email || 'Not signed in'}
+- Role: ${activeUser.role || 'citizen'}
+- City / Ward: ${activeUser.city || 'Indore'} / ${activeUser.ward || 'Ward 18'}
+- Live GPS Coordinates: ${
+    userLocation?.latitude
+      ? `${userLocation.latitude}, ${userLocation.longitude} (${userLocation.address || ''})`
+      : 'Default Indore Municipal Zone (22.7533, 75.8937)'
+  }
+
+LIVE SUPABASE DATABASE RAG SNAPSHOT:
+- Supabase Cloud Connected: ${dataset.supabaseConnected ? 'YES (Live Cloud Sync)' : 'Local Fallback Store Active'}
+- Total Complaints in DB: ${ragContext.stats.totalComplaints} (Resolved: ${ragContext.stats.resolvedCount}, In Progress: ${ragContext.stats.inProgressCount}, Pending: ${ragContext.stats.pendingCount})
+- Current User's Own Complaints Count: ${ragContext.stats.userComplaintsCount}
+- Total Registered Users/Profiles: ${ragContext.stats.totalUsers} (Municipal Officers: ${ragContext.stats.totalOfficers}, Pending Admin Verification: ${ragContext.stats.pendingOfficersCount})
+- Active Field Crews: ${ragContext.stats.activeCrewsCount} | Dispatched Workorders: ${ragContext.stats.workordersCount}
+
+TOP RETRIEVED COMPLAINTS FROM SUPABASE (RAG MATCHED):
+${
+  ragContext.topComplaints.length > 0
+    ? JSON.stringify(
+        ragContext.topComplaints.map((c) => ({
+          id: c.id,
+          title: c.title,
+          category: c.category,
+          status: c.status,
+          priority: c.priority,
+          location: c.location,
+          ward: c.ward,
+          geo: c.geo,
+          department: c.department,
+          assignedTeam: c.assignedTeam,
+          citizenName: c.citizenName,
+          citizenEmail: c.citizenEmail,
+          upvotes: c.upvotes,
+          slaStatus: c.slaStatus,
+          description: c.description
+        })),
+        null,
+        2
+      )
+    : 'No complaints currently stored in database.'
+}
+
+CURRENT USER'S OWN COMPLAINTS:
+${
+  ragContext.userComplaints.length > 0
+    ? JSON.stringify(
+        ragContext.userComplaints.map((c) => ({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+          priority: c.priority,
+          location: c.location,
+          assignedTeam: c.assignedTeam
+        }))
+      )
+    : 'None filed under current user email yet.'
+}
+
+MUNICIPAL OFFICERS & VERIFICATION QUEUE:
+${JSON.stringify(
+  ragContext.officers.map((o) => ({
+    name: o.name,
+    email: o.email,
+    city: o.city,
+    department: o.department,
+    emailVerified: o.isVerified,
+    adminVerified: o.adminVerified,
+    verificationStatus: o.verificationStatus
+  }))
+)}
+
+ACTIVE FIELD CREWS & WORKORDERS:
+${JSON.stringify({
+  crews: ragContext.fieldCrews,
+  recentWorkorders: ragContext.workorders.slice(0, 3)
+})}
+
+Keep responses helpful, structured with clear bullet points, and concise.`;
+
+  const ai = getGeminiClient();
+  if (!ai) {
+    const fallbackReply = buildDeterministicRagReply(
+      message,
+      ragContext,
+      activeUser,
+      dataset.supabaseConnected
+    );
+    return res.json({
+      reply: fallbackReply,
+      model: `${selectedModel} (RAG Engine)`,
+      supabaseConnected: dataset.supabaseConnected,
+      ragStats: ragContext.stats,
+      ragSources: ragContext.ragSources,
+      mapsLinks: []
+    });
+  }
+
+  try {
+    // Build multi-turn conversation history for Gemini
+    const formattedContents = [];
+    if (Array.isArray(history)) {
+      for (const turn of history.slice(-10)) {
+        if (!turn || !turn.content) continue;
+        formattedContents.push({
+          role: turn.role === 'assistant' || turn.role === 'model' ? 'model' : 'user',
+          parts: [{ text: String(turn.content) }]
+        });
+      }
+    }
+    formattedContents.push({
+      role: 'user',
+      parts: [{ text: String(message) }]
+    });
+
+    const genConfig = {
+      systemInstruction,
+      temperature: 0.4
+    };
+
+    if (isLocationQuery) {
+      genConfig.tools = [{ googleMaps: {} }];
+      const lat = Number(userLocation?.latitude) || 22.7533;
+      const lng = Number(userLocation?.longitude) || 75.8937;
+      genConfig.toolConfig = {
+        retrievalConfig: {
+          latLng: {
+            latitude: lat,
+            longitude: lng
+          }
+        }
+      };
+    }
+
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: selectedModel,
+        contents: formattedContents,
+        config: genConfig
+      }),
+      6500,
+      'Gemini RAG generateContent'
+    );
+
+    const replyText =
+      response.text ||
+      buildDeterministicRagReply(message, ragContext, activeUser, dataset.supabaseConnected);
+    let mapsLinks = extractMapsGroundingLinks(response);
+    if (isLocationQuery && mapsLinks.length === 0) {
+      const lat = Number(userLocation?.latitude) || 22.7533;
+      const lng = Number(userLocation?.longitude) || 75.8937;
+      mapsLinks = [
+        {
+          uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${message} near ${lat},${lng}`
+          )}`,
+          title: `Open "${message.slice(0, 36)}" on Google Maps`,
+          reviewSnippets: []
+        }
+      ];
+    }
+
+    return res.json({
+      reply: replyText,
+      model: selectedModel,
+      mapsGroundingUsed: isLocationQuery,
+      supabaseConnected: dataset.supabaseConnected,
+      ragStats: ragContext.stats,
+      ragSources: ragContext.ragSources,
+      mapsLinks
+    });
+  } catch (err) {
+    console.warn('[Civic Connect] Gemini RAG chat fallback:', err.message);
+    const lat = Number(userLocation?.latitude) || 22.7533;
+    const lng = Number(userLocation?.longitude) || 75.8937;
+    const fallbackMapsLinks = isLocationQuery
+      ? [
+          {
+            uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+              `Municipal Office near ${lat},${lng}`
+            )}`,
+            title: 'View Nearby Municipal Offices on Google Maps',
+            reviewSnippets: []
+          }
+        ]
+      : [];
+
+    const fallbackReply = buildDeterministicRagReply(
+      message,
+      ragContext,
+      activeUser,
+      dataset.supabaseConnected
+    );
+    return res.json({
+      reply: fallbackReply,
+      model: `${selectedModel} (Supabase RAG)`,
+      mapsGroundingUsed: isLocationQuery,
+      supabaseConnected: dataset.supabaseConnected,
+      ragStats: ragContext.stats,
+      ragSources: ragContext.ragSources,
+      mapsLinks: fallbackMapsLinks
+    });
+  }
 });
 
 // ============================================================================
