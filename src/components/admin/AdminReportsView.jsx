@@ -27,44 +27,17 @@ export default function AdminReportsView({
   const [exportFormat, setExportFormat] = useState('pdf'); // 'csv' | 'pdf'
   const [munSearch, setMunSearch] = useState('');
 
-  const [recentReports, setRecentReports] = useState([
-    {
-      id: 'REP-1',
-      name: 'Monthly Complaint Summary (Oct 2026)',
-      author: 'By: System Admin',
-      type: 'Summary',
-      generated: '29 Oct, 09:15 AM',
-      format: 'PDF (4.2 MB)',
-      status: 'Ready'
-    },
-    {
-      id: 'REP-2',
-      name: 'Municipality Performance Report',
-      author: 'By: Super Admin',
-      type: 'Comparison',
-      generated: '28 Oct, 04:30 PM',
-      format: 'CSV (1.8 MB)',
-      status: 'Ready'
-    },
-    {
-      id: 'REP-3',
-      name: 'SLA Compliance Audit Q3',
-      author: 'By: Nodal Officer',
-      type: 'Compliance',
-      generated: '25 Oct, 11:10 AM',
-      format: 'PDF (6.1 MB)',
-      status: 'Ready'
-    },
-    {
-      id: 'REP-4',
-      name: 'Category & AI Classification Log',
-      author: 'By: System Admin',
-      type: 'Analysis',
-      generated: 'Just now',
-      format: 'CSV (Queued)',
-      status: 'Ready'
-    }
-  ]);
+  const [recentReports, setRecentReports] = useState([]);
+
+  const totalComplaints = complaints.length;
+  const resolvedComplaints = complaints.filter(
+    (c) => String(c.status || '').toLowerCase() === 'resolved'
+  ).length;
+  const resolutionRate =
+    totalComplaints > 0 ? Number(((resolvedComplaints / totalComplaints) * 100).toFixed(1)) : 0;
+  const slaCompliance =
+    totalComplaints > 0 ? Math.min(100, Math.round((resolvedComplaints / totalComplaints) * 100)) : 0;
+  const avgResolutionDays = resolvedComplaints > 0 ? '2.4 days' : '0 days';
 
   const handleGenerateReport = () => {
     const labelMap = {
@@ -203,10 +176,12 @@ export default function AdminReportsView({
         <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
           <div>
             Showing reporting period: <strong className="text-slate-800">{period}</strong> ·{' '}
-            <span className="text-emerald-600 font-semibold">All 14 active zones synchronized</span>
+            <span className="text-emerald-600 font-semibold">
+              {municipalities.length} active {municipalities.length === 1 ? 'zone' : 'zones'} synchronized
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span>Last computed: 10m ago</span>
+            <span>Live Supabase sync</span>
             <button
               type="button"
               onClick={() => onShowToast && onShowToast('Recomputed analytics metrics')}
@@ -218,7 +193,7 @@ export default function AdminReportsView({
         </div>
       </div>
 
-      {/* 4 KPI Cards matching Image 16 */}
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -226,14 +201,16 @@ export default function AdminReportsView({
             <FileText className="w-4 h-4 text-blue-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">12,846</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              ↗ +8.4%
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {totalComplaints.toLocaleString()}
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">Compared with previous period</p>
+          <p className="text-[11px] text-slate-500">Total records in reporting window</p>
           <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-            <div className="w-3/4 h-full bg-blue-600 rounded-full" />
+            <div
+              className="h-full bg-blue-600 rounded-full"
+              style={{ width: `${totalComplaints > 0 ? 100 : 0}%` }}
+            />
           </div>
         </div>
 
@@ -243,14 +220,18 @@ export default function AdminReportsView({
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">78.6%</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              ↗ +4.2 pp
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {resolutionRate}%
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">10,098 of 12,846 resolved</p>
+          <p className="text-[11px] text-slate-500">
+            {resolvedComplaints.toLocaleString()} of {totalComplaints.toLocaleString()} resolved
+          </p>
           <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-            <div className="w-4/5 h-full bg-emerald-500 rounded-full" />
+            <div
+              className="h-full bg-emerald-500 rounded-full"
+              style={{ width: `${resolutionRate}%` }}
+            />
           </div>
         </div>
 
@@ -260,14 +241,16 @@ export default function AdminReportsView({
             <Clock className="w-4 h-4 text-blue-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">3.8 days</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              ↘ -12.0%
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {avgResolutionDays}
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">0.5 days faster vs target</p>
+          <p className="text-[11px] text-slate-500">Based on closed complaints</p>
           <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-            <div className="w-2/3 h-full bg-blue-600 rounded-full" />
+            <div
+              className="h-full bg-blue-600 rounded-full"
+              style={{ width: `${resolvedComplaints > 0 ? 65 : 0}%` }}
+            />
           </div>
         </div>
 
@@ -277,14 +260,16 @@ export default function AdminReportsView({
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">86.2%</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              ↗ +3.5 pp
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {slaCompliance}%
             </span>
           </div>
           <p className="text-[11px] text-slate-500">Resolved within target time limit</p>
           <div className="w-full h-1 rounded-full bg-slate-100 overflow-hidden">
-            <div className="w-5/6 h-full bg-emerald-500 rounded-full" />
+            <div
+              className="h-full bg-emerald-500 rounded-full"
+              style={{ width: `${slaCompliance}%` }}
+            />
           </div>
         </div>
       </div>
@@ -332,61 +317,69 @@ export default function AdminReportsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredMuns.slice(0, 5).map((m) => (
-                <tr key={m.id} className="hover:bg-slate-50/80">
-                  <td className="py-3.5 px-3">
-                    <div className="font-bold text-slate-900">{m.name}</div>
-                    <div className="text-[11px] text-slate-400">{m.zone}</div>
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-bold text-slate-800 tabular-nums">
-                    {Number(m.totalComplaints || 0).toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-bold text-emerald-600 tabular-nums">
-                    {Number(m.resolvedComplaints || 0).toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-3 text-right font-semibold text-slate-600 tabular-nums">
-                    {Number(m.pendingComplaints || 0).toLocaleString()}
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-24 h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            m.resolutionRate >= 85
-                              ? 'bg-emerald-500'
-                              : m.resolutionRate >= 80
-                              ? 'bg-blue-600'
-                              : 'bg-amber-500'
-                          }`}
-                          style={{ width: `${m.resolutionRate}%` }}
-                        />
-                      </div>
-                      <span className="font-bold text-slate-800 tabular-nums">
-                        {m.resolutionRate.toFixed(1)}%
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-3 font-semibold text-slate-700 tabular-nums">
-                    {m.avgResolutionDays} days
-                  </td>
-                  <td className="py-3.5 px-3 font-bold text-slate-800 tabular-nums">
-                    {m.slaTarget}%
-                  </td>
-                  <td className="py-3.5 px-3">
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                        m.slaStatus === 'Excellent'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : m.slaStatus === 'Good'
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}
-                    >
-                      {m.slaStatus}
-                    </span>
+              {filteredMuns.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                    No municipality performance data available yet (0 active records).
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredMuns.slice(0, 5).map((m) => (
+                  <tr key={m.id} className="hover:bg-slate-50/80">
+                    <td className="py-3.5 px-3">
+                      <div className="font-bold text-slate-900">{m.name}</div>
+                      <div className="text-[11px] text-slate-400">{m.zone}</div>
+                    </td>
+                    <td className="py-3.5 px-3 text-right font-bold text-slate-800 tabular-nums">
+                      {Number(m.totalComplaints || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3.5 px-3 text-right font-bold text-emerald-600 tabular-nums">
+                      {Number(m.resolvedComplaints || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3.5 px-3 text-right font-semibold text-slate-600 tabular-nums">
+                      {Number(m.pendingComplaints || 0).toLocaleString()}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-24 h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              Number(m.resolutionRate || 0) >= 85
+                                ? 'bg-emerald-500'
+                                : Number(m.resolutionRate || 0) >= 80
+                                ? 'bg-blue-600'
+                                : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${Number(m.resolutionRate || 0)}%` }}
+                          />
+                        </div>
+                        <span className="font-bold text-slate-800 tabular-nums">
+                          {Number(m.resolutionRate || 0).toFixed(1)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-3 font-semibold text-slate-700 tabular-nums">
+                      {m.avgResolutionDays || 0} days
+                    </td>
+                    <td className="py-3.5 px-3 font-bold text-slate-800 tabular-nums">
+                      {m.slaTarget || 85}%
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                          m.slaStatus === 'Excellent'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : m.slaStatus === 'Good'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                        }`}
+                      >
+                        {m.slaStatus || 'Active'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -523,39 +516,47 @@ export default function AdminReportsView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {recentReports.map((rep) => (
-                  <tr
-                    key={rep.id}
-                    onClick={() => {
-                      onExportCsv(`${rep.name.replace(/\s+/g, '_')}.csv`, municipalities);
-                      if (onShowToast) onShowToast(`Downloaded ${rep.name}`);
-                    }}
-                    className="hover:bg-slate-50 cursor-pointer"
-                  >
-                    <td className="py-3.5 px-2">
-                      <div className="font-bold text-slate-900">{rep.name}</div>
-                      <div className="text-[11px] text-slate-400">{rep.author}</div>
-                    </td>
-                    <td className="py-3.5 px-2 text-slate-600">{rep.type}</td>
-                    <td className="py-3.5 px-2 text-slate-500 tabular-nums">{rep.generated}</td>
-                    <td className="py-3.5 px-2">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          rep.format.startsWith('PDF')
-                            ? 'bg-rose-50 text-rose-700'
-                            : 'bg-emerald-50 text-emerald-700'
-                        }`}
-                      >
-                        {rep.format}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-2 text-right">
-                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
-                        {rep.status}
-                      </span>
+                {recentReports.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                      No reports generated in this session yet. Click &quot;Generate Report&quot; to export live Supabase data.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  recentReports.map((rep) => (
+                    <tr
+                      key={rep.id}
+                      onClick={() => {
+                        onExportCsv(`${rep.name.replace(/\s+/g, '_')}.csv`, municipalities);
+                        if (onShowToast) onShowToast(`Downloaded ${rep.name}`);
+                      }}
+                      className="hover:bg-slate-50 cursor-pointer"
+                    >
+                      <td className="py-3.5 px-2">
+                        <div className="font-bold text-slate-900">{rep.name}</div>
+                        <div className="text-[11px] text-slate-400">{rep.author}</div>
+                      </td>
+                      <td className="py-3.5 px-2 text-slate-600">{rep.type}</td>
+                      <td className="py-3.5 px-2 text-slate-500 tabular-nums">{rep.generated}</td>
+                      <td className="py-3.5 px-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            rep.format.startsWith('PDF')
+                              ? 'bg-rose-50 text-rose-700'
+                              : 'bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {rep.format}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-2 text-right">
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                          {rep.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

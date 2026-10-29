@@ -29,8 +29,25 @@ export default function AdminCitizenView({
   const [municipalityFilter, setMunicipalityFilter] = useState('All Municipalities');
   const [verificationFilter, setVerificationFilter] = useState('Verification Status');
   const [accountStatusFilter, setAccountStatusFilter] = useState('Account Status');
-  const [selectedIds, setSelectedIds] = useState(['CIT-20481']);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [focusedCitizen, setFocusedCitizen] = useState(citizens[0] || null);
+
+  const verifiedCitizensCount = useMemo(
+    () => citizens.filter((c) => c.verification === 'Verified').length,
+    [citizens]
+  );
+  const verifiedRatePct =
+    citizens.length > 0 ? ((verifiedCitizensCount / citizens.length) * 100).toFixed(1) : '0.0';
+  const suspendedCitizensCount = useMemo(
+    () => citizens.filter((c) => c.accountStatus === 'Suspended').length,
+    [citizens]
+  );
+  const suspendedRatePct =
+    citizens.length > 0 ? ((suspendedCitizensCount / citizens.length) * 100).toFixed(1) : '0.0';
+  const activeMunicipalityCount = useMemo(
+    () => new Set(citizens.map((c) => c.municipality).filter(Boolean)).size,
+    [citizens]
+  );
 
   const filteredCitizens = useMemo(() => {
     return citizens.filter((c) => {
@@ -111,7 +128,7 @@ export default function AdminCitizenView({
         </div>
       </div>
 
-      {/* 4 KPI Cards matching Image 15 */}
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -122,13 +139,12 @@ export default function AdminCitizenView({
           </div>
           <div className="flex items-baseline gap-2.5">
             <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
-              {(84320 + Math.max(0, citizens.length - 7)).toLocaleString()}
-            </span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              +14.2%
+              {citizens.length.toLocaleString()}
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">Registered across 14 active municipalities</p>
+          <p className="text-[11px] text-slate-500">
+            Registered across {activeMunicipalityCount} active {activeMunicipalityCount === 1 ? 'municipality' : 'municipalities'}
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -139,12 +155,14 @@ export default function AdminCitizenView({
             </div>
           </div>
           <div className="flex items-baseline gap-2.5">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">79,105</span>
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {verifiedCitizensCount.toLocaleString()}
+            </span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              93.8% Rate
+              {verifiedRatePct}% Rate
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">Aadhaar / OTP &amp; email verified citizens</p>
+          <p className="text-[11px] text-slate-500">OTP &amp; email verified citizens</p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -155,12 +173,11 @@ export default function AdminCitizenView({
             </div>
           </div>
           <div className="flex items-baseline gap-2.5">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">3,412</span>
-            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold">
-              +8.4% vs Sep
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {citizens.length.toLocaleString()}
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">Onboarded during October 2026</p>
+          <p className="text-[11px] text-slate-500">Onboarded in current billing cycle</p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -171,9 +188,11 @@ export default function AdminCitizenView({
             </div>
           </div>
           <div className="flex items-baseline gap-2.5">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">148</span>
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {suspendedCitizensCount.toLocaleString()}
+            </span>
             <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 text-[11px] font-bold">
-              0.17% Total
+              {suspendedRatePct}% Total
             </span>
           </div>
           <p className="text-[11px] text-slate-500">Flagged for spam or policy violation</p>
@@ -264,8 +283,11 @@ export default function AdminCitizenView({
             )}
           </div>
           <span className="text-[11px] text-slate-500">
-            Showing <strong className="text-slate-800">1–{filteredCitizens.length}</strong> of{' '}
-            <strong className="text-slate-800">84,320</strong> citizens
+            Showing{' '}
+            <strong className="text-slate-800">
+              {filteredCitizens.length === 0 ? 0 : `1–${filteredCitizens.length}`}
+            </strong>{' '}
+            of <strong className="text-slate-800">{citizens.length.toLocaleString()}</strong> citizens
           </span>
         </div>
 
@@ -287,10 +309,17 @@ export default function AdminCitizenView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredCitizens.map((c) => {
-                const isSelected = activeFocusedCitizen?.id === c.id;
-                const isVerified = c.verification === 'Verified';
-                const isSuspended = c.accountStatus === 'Suspended';
+              {filteredCitizens.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-10 text-center text-slate-400">
+                    No registered citizens found in Supabase database.
+                  </td>
+                </tr>
+              ) : (
+                filteredCitizens.map((c) => {
+                  const isSelected = activeFocusedCitizen?.id === c.id;
+                  const isVerified = c.verification === 'Verified';
+                  const isSuspended = c.accountStatus === 'Suspended';
                 return (
                   <tr
                     key={c.id}
@@ -377,7 +406,8 @@ export default function AdminCitizenView({
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>

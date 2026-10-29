@@ -10,12 +10,23 @@ import {
 // Local storage keys
 const STORAGE_KEY_URL = 'civic_supabase_url_v1';
 const STORAGE_KEY_KEY = 'civic_supabase_anon_key_v1';
-const STORAGE_KEY_COMPLAINTS = 'civic_connect_complaints_v5';
-const STORAGE_KEY_NOTIFICATIONS = 'civic_connect_notifications_v5';
-const STORAGE_KEY_USER = 'civic_connect_current_user_v4';
-const STORAGE_KEY_TOKEN = 'civic_connect_auth_token_v4';
-const STORAGE_KEY_UPDATES = 'civic_connect_updates_v5';
-const LEGACY_SEED_IDS = new Set(['CC10245', 'CC10244', 'CC10243', 'CC10242']);
+const STORAGE_KEY_COMPLAINTS = 'civic_connect_complaints_v6';
+const STORAGE_KEY_NOTIFICATIONS = 'civic_connect_notifications_v6';
+const STORAGE_KEY_USER = 'civic_connect_current_user_v6';
+const STORAGE_KEY_TOKEN = 'civic_connect_auth_token_v6';
+const STORAGE_KEY_UPDATES = 'civic_connect_updates_v6';
+const LEGACY_SEED_IDS = new Set([
+  'CC10247',
+  'CC10246',
+  'CC10245',
+  'CC10244',
+  'CC10243',
+  'CC10242',
+  'CMP-10245',
+  'CMP-10244',
+  'CMP-10243',
+  'CMP-10242'
+]);
 
 // Helper to determine active credentials (Native Anon Key only)
 function getActiveCredentials() {
@@ -227,9 +238,9 @@ function normalizeComplaintRow(row) {
     department: row.department || 'Public Works Department',
     image: row.image || 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=800&q=80',
     description: row.description || '',
-    citizenName: row.citizen_name || row.citizenName || 'Priya Sharma',
-    citizenEmail: row.citizen_email || row.citizenEmail || 'priya.sharma@example.com',
-    upvotes: typeof row.upvotes === 'number' ? row.upvotes : 1,
+    citizenName: row.citizen_name || row.citizenName || 'Citizen Reporter',
+    citizenEmail: row.citizen_email || row.citizenEmail || '',
+    upvotes: typeof row.upvotes === 'number' ? row.upvotes : 0,
     slaHours: row.sla_hours || row.slaHours || 24,
     slaDeadline: row.sla_deadline || row.slaDeadline,
     slaStatus: row.sla_status || row.slaStatus || 'On Track',
@@ -264,6 +275,28 @@ export const civicDataService = {
       key: activeCredentials.key,
       isRealCloud: activeCredentials.isRealCloud,
       isConfigured: Boolean(supabase)
+    };
+  },
+
+  async getStats() {
+    try {
+      const res = await apiFetch('/api/stats');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // fallback
+    }
+    return {
+      total: 0,
+      liveTicketsCount: 0,
+      resolved: 0,
+      inProgress: 0,
+      pending: 0,
+      overdue: 0,
+      citizenCount: 0,
+      officerCount: 0,
+      resolutionRate: '0%'
     };
   },
 

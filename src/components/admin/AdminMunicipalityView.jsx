@@ -60,9 +60,27 @@ export default function AdminMunicipalityView({
     [officers]
   );
 
-  const pendingQueueCount =
-    9 +
-    officers.filter((o) => !o.adminVerified && o.verificationStatus !== 'Verified').length;
+  const pendingQueueCount = useMemo(
+    () =>
+      officers.filter((o) => !o.adminVerified && o.verificationStatus !== 'Verified').length +
+      municipalities.filter((m) => m.verification === 'Pending').length,
+    [officers, municipalities]
+  );
+
+  const activeMunCount = useMemo(
+    () => municipalities.filter((m) => m.status === 'Active').length,
+    [municipalities]
+  );
+  const inactiveMunCount = useMemo(
+    () => municipalities.filter((m) => m.status !== 'Active').length,
+    [municipalities]
+  );
+  const activeMunPct =
+    municipalities.length > 0 ? Math.round((activeMunCount / municipalities.length) * 100) : 0;
+  const distinctStatesCount = useMemo(
+    () => new Set(municipalities.map((m) => m.state).filter(Boolean)).size,
+    [municipalities]
+  );
 
   const filteredMunicipalities = useMemo(() => {
     return municipalities.filter((m) => {
@@ -152,7 +170,7 @@ export default function AdminMunicipalityView({
         </div>
       </div>
 
-      {/* 4 KPI Cards matching Image 13 */}
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -162,9 +180,11 @@ export default function AdminMunicipalityView({
             </div>
           </div>
           <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
-            {156 + Math.max(0, municipalities.length - 7)}
+            {municipalities.length.toLocaleString()}
           </div>
-          <p className="text-[11px] text-slate-500">Across 2 states &amp; union territories</p>
+          <p className="text-[11px] text-slate-500">
+            Across {distinctStatesCount} {distinctStatesCount === 1 ? 'state' : 'states'} &amp; union territories
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -175,12 +195,14 @@ export default function AdminMunicipalityView({
             </div>
           </div>
           <div className="flex items-baseline gap-2.5">
-            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">142</span>
+            <span className="text-3xl font-extrabold text-slate-900 tabular-nums">
+              {activeMunCount.toLocaleString()}
+            </span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-bold">
-              91% Active
+              {activeMunPct}% Active
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">91% platform operational rate</p>
+          <p className="text-[11px] text-slate-500">{activeMunPct}% platform operational rate</p>
         </div>
 
         <div
@@ -211,7 +233,9 @@ export default function AdminMunicipalityView({
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">5</div>
+          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
+            {inactiveMunCount.toLocaleString()}
+          </div>
           <p className="text-[11px] text-slate-500">Suspended or onboarding</p>
         </div>
       </div>
@@ -445,9 +469,16 @@ export default function AdminMunicipalityView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredMunicipalities.map((m) => {
-                const isVerified = m.verification === 'Verified';
-                const isActive = m.status === 'Active';
+              {filteredMunicipalities.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-10 text-center text-slate-400">
+                    No municipalities registered yet. Click &quot;+ Add Municipality&quot; or approve a Municipal Officer to register a node.
+                  </td>
+                </tr>
+              ) : (
+                filteredMunicipalities.map((m) => {
+                  const isVerified = m.verification === 'Verified';
+                  const isActive = m.status === 'Active';
                 return (
                   <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-4 px-4">
@@ -532,23 +563,25 @@ export default function AdminMunicipalityView({
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
 
         <div className="px-5 py-3.5 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
           <div>
-            Showing <strong className="text-slate-900">1–{filteredMunicipalities.length}</strong> of{' '}
-            <strong className="text-slate-900">156</strong> municipalities
+            Showing{' '}
+            <strong className="text-slate-900">
+              {filteredMunicipalities.length === 0 ? 0 : `1–${filteredMunicipalities.length}`}
+            </strong>{' '}
+            of <strong className="text-slate-900">{municipalities.length.toLocaleString()}</strong> municipalities
           </div>
           <div className="flex items-center gap-1.5">
             <button className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600">
               &lt; Previous
             </button>
             <button className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold">1</button>
-            <button className="w-8 h-8 rounded-lg border border-slate-200 text-slate-700">2</button>
-            <button className="w-8 h-8 rounded-lg border border-slate-200 text-slate-700">3</button>
           </div>
         </div>
       </div>

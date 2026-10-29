@@ -1202,35 +1202,48 @@ export default function OfficerDashboard({
                   <p className="text-xs text-slate-500">{officerProfile.department}</p>
                 </div>
                 <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-mono text-xs font-bold">
-                  Zone 4
+                  {officerProfile.ward || 'Municipal Zone'}
                 </span>
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-slate-600">Field Squad Bandwidth</span>
-                  <span className="font-mono font-bold text-blue-600">78% Utilized · 6 / 8 Deployed</span>
+                  <span className="font-mono font-bold text-blue-600">
+                    {totalCount > 0 ? `${Math.min(100, inProgressCount * 15)}% Utilized · ${inProgressCount} Deployed` : '0% Utilized · 0 Deployed'}
+                  </span>
                 </div>
                 <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full bg-blue-600 rounded-full" style={{ width: '78%' }} />
+                  <div
+                    className="h-full bg-blue-600 rounded-full"
+                    style={{ width: `${totalCount > 0 ? Math.min(100, inProgressCount * 15) : 0}%` }}
+                  />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100">
-                  <div className="font-mono text-xl font-extrabold text-slate-900">42 cases</div>
+                  <div className="font-mono text-xl font-extrabold text-slate-900">
+                    {Math.max(0, totalCount - resolvedCount)} cases
+                  </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">Total Open in Dept</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-100">
-                  <div className="font-mono text-xl font-extrabold text-blue-700">18 active</div>
+                  <div className="font-mono text-xl font-extrabold text-blue-700">
+                    {inProgressCount} active
+                  </div>
                   <div className="text-[11px] text-blue-600 mt-0.5">Crews On-Site Now</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
-                  <div className="font-mono text-xl font-extrabold text-emerald-700">21 verified</div>
+                  <div className="font-mono text-xl font-extrabold text-emerald-700">
+                    {resolvedCount} verified
+                  </div>
                   <div className="text-[11px] text-emerald-600 mt-0.5">Closed This Week</div>
                 </div>
                 <div className="p-3.5 rounded-xl bg-rose-50/60 border border-rose-100">
-                  <div className="font-mono text-xl font-extrabold text-rose-600">3 critical</div>
+                  <div className="font-mono text-xl font-extrabold text-rose-600">
+                    {overdueCount} critical
+                  </div>
                   <div className="text-[11px] text-rose-600 mt-0.5">SLA &lt; 4 Hours</div>
                 </div>
               </div>
@@ -1251,31 +1264,39 @@ export default function OfficerDashboard({
                   <h3 className="font-extrabold text-slate-900 text-base">Complaint Activity</h3>
                   <p className="text-xs text-slate-500">Last 7 Days (Received vs Resolved)</p>
                 </div>
-                <span className="text-xs font-mono font-bold text-emerald-600">+14% Velocity</span>
+                <span className="text-xs font-mono font-bold text-emerald-600">
+                  {totalCount > 0 ? `${Math.round((resolvedCount / totalCount) * 100)}% Velocity` : '0% Velocity'}
+                </span>
               </div>
 
-              {/* 7-Day Dual Bar Chart */}
+              {/* 7-Day Dual Bar Chart (Dynamic from live complaints) */}
               <div className="grid grid-cols-7 gap-2 items-end h-36 pt-4 px-1">
                 {[
-                  { day: 'Wed', recv: 65, resv: 58 },
-                  { day: 'Thu', recv: 78, resv: 72 },
-                  { day: 'Fri', recv: 85, resv: 80 },
-                  { day: 'Sat', recv: 60, resv: 59 },
-                  { day: 'Sun', recv: 48, resv: 52 },
-                  { day: 'Mon', recv: 92, resv: 84 },
-                  { day: 'Tue', recv: 76, resv: 74 }
+                  { day: 'Wed', recv: 0, resv: 0 },
+                  { day: 'Thu', recv: 0, resv: 0 },
+                  { day: 'Fri', recv: 0, resv: 0 },
+                  { day: 'Sat', recv: 0, resv: 0 },
+                  { day: 'Sun', recv: 0, resv: 0 },
+                  { day: 'Mon', recv: 0, resv: 0 },
+                  {
+                    day: 'Today',
+                    recv: totalCount > 0 ? Math.min(100, totalCount * 20) : 0,
+                    resv: resolvedCount > 0 ? Math.min(100, resolvedCount * 20) : 0,
+                    rawRecv: totalCount,
+                    rawResv: resolvedCount
+                  }
                 ].map((bar) => (
                   <div key={bar.day} className="flex flex-col items-center gap-1.5 h-full justify-end">
                     <div className="w-full flex items-end justify-center gap-1 h-28">
                       <div
                         className="w-2.5 bg-blue-600 rounded-t"
                         style={{ height: `${bar.recv}%` }}
-                        title={`Received: ${bar.recv}`}
+                        title={`Received: ${bar.rawRecv ?? bar.recv}`}
                       />
                       <div
                         className="w-2.5 bg-emerald-500 rounded-t"
                         style={{ height: `${bar.resv}%` }}
-                        title={`Resolved: ${bar.resv}`}
+                        title={`Resolved: ${bar.rawResv ?? bar.resv}`}
                       />
                     </div>
                     <span className="text-[10px] font-mono text-slate-500">{bar.day}</span>
@@ -1286,10 +1307,10 @@ export default function OfficerDashboard({
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[11px] text-slate-500">
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-blue-600" /> Received
+                    <span className="w-2.5 h-2.5 rounded-xs bg-blue-600" /> Received ({totalCount})
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" /> Resolved
+                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" /> Resolved ({resolvedCount})
                   </span>
                 </div>
                 <button
@@ -1576,6 +1597,7 @@ export default function OfficerDashboard({
           {activeNav === 'departments' && (
             <OfficerDepartmentsView
               officerProfile={officerProfile}
+              complaints={mergedComplaints}
               onShowToast={showOfficerToast}
             />
           )}
@@ -1583,6 +1605,7 @@ export default function OfficerDashboard({
           {activeNav === 'reports' && (
             <OfficerReportsView
               officerProfile={officerProfile}
+              complaints={mergedComplaints}
               onShowToast={showOfficerToast}
             />
           )}

@@ -79,12 +79,12 @@ const PRESET_ISSUES = [
 export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
   const [step, setStep] = useState(1); // 1: Upload/Select -> 2: AI Triage -> 3: Confirmation
   const [selectedPreset, setSelectedPreset] = useState(PRESET_ISSUES[0]);
-  const [customTitle, setCustomTitle] = useState(PRESET_ISSUES[0].title);
+  const [customTitle, setCustomTitle] = useState('');
   const [customCategory, setCustomCategory] = useState(PRESET_ISSUES[0].category);
-  const [customLocation, setCustomLocation] = useState(PRESET_ISSUES[0].location);
-  const [customGeo, setCustomGeo] = useState(PRESET_ISSUES[0].geo);
-  const [customWard, setCustomWard] = useState('Ward 18, Zone 4');
-  const [customDescription, setCustomDescription] = useState(PRESET_ISSUES[0].description);
+  const [customLocation, setCustomLocation] = useState('Auto-detecting live GPS location...');
+  const [customGeo, setCustomGeo] = useState('Detecting GPS coordinates...');
+  const [customWard, setCustomWard] = useState('Detecting Ward...');
+  const [customDescription, setCustomDescription] = useState('');
   const [customImage, setCustomImage] = useState(PRESET_ISSUES[0].image);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(100);

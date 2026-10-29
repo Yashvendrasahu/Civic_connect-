@@ -40,50 +40,27 @@ export default function AdminDashboard({
   const [selectedDossier, setSelectedDossier] = useState(null);
   const [globalSearch, setGlobalSearch] = useState('');
 
-  // State combining live database records + reference analytics dataset
-  const [municipalities, setMunicipalities] = useState(ADMIN_REFERENCE_MUNICIPALITIES);
+  // State driven 100% by live Supabase & Express backend records (starts empty)
+  const [municipalities, setMunicipalities] = useState([]);
   const [officers, setOfficers] = useState([]);
-  const [citizens, setCitizens] = useState(ADMIN_REFERENCE_CITIZENS);
-  const [adminComplaints, setAdminComplaints] = useState(ADMIN_REFERENCE_COMPLAINTS);
+  const [citizens, setCitizens] = useState([]);
+  const [adminComplaints, setAdminComplaints] = useState([]);
 
   const loadAdminBackendState = async () => {
     try {
       const overviewData = await civicDataService.getAdminOverview();
       if (overviewData) {
-        if (Array.isArray(overviewData.officers)) {
-          setOfficers(overviewData.officers);
-        }
-        if (Array.isArray(overviewData.municipalities) && overviewData.municipalities.length > 0) {
-          const liveMunMap = new Map(overviewData.municipalities.map((m) => [m.id, m]));
-          const mergedMuns = ADMIN_REFERENCE_MUNICIPALITIES.map((ref) =>
-            liveMunMap.has(ref.id) ? { ...ref, ...liveMunMap.get(ref.id) } : ref
-          );
-          const brandNewMuns = overviewData.municipalities.filter(
-            (m) => !ADMIN_REFERENCE_MUNICIPALITIES.some((ref) => ref.id === m.id)
-          );
-          setMunicipalities([...brandNewMuns, ...mergedMuns]);
-        }
-        if (Array.isArray(overviewData.citizens) && overviewData.citizens.length > 0) {
-          const refEmails = new Set(
-            ADMIN_REFERENCE_CITIZENS.map((c) => (c.email || '').toLowerCase())
-          );
-          const newLiveCitizens = overviewData.citizens.filter(
-            (c) => !refEmails.has((c.email || '').toLowerCase())
-          );
-          setCitizens([...newLiveCitizens, ...ADMIN_REFERENCE_CITIZENS]);
-        }
-        if (Array.isArray(overviewData.complaints) && overviewData.complaints.length > 0) {
-          const refIds = new Set(
-            ADMIN_REFERENCE_COMPLAINTS.map((c) => String(c.id).replace(/^#/, ''))
-          );
-          const newLiveComplaints = overviewData.complaints.filter(
-            (c) => !refIds.has(String(c.id).replace(/^#/, ''))
-          );
-          setAdminComplaints([...newLiveComplaints, ...ADMIN_REFERENCE_COMPLAINTS]);
-        }
+        setOfficers(Array.isArray(overviewData.officers) ? overviewData.officers : []);
+        setMunicipalities(
+          Array.isArray(overviewData.municipalities) ? overviewData.municipalities : []
+        );
+        setCitizens(Array.isArray(overviewData.citizens) ? overviewData.citizens : []);
+        setAdminComplaints(
+          Array.isArray(overviewData.complaints) ? overviewData.complaints : []
+        );
       }
     } catch (e) {
-      // Fallback merges liveComplaints with reference complaints
+      // Fallback keeps current live state
     }
   };
 
@@ -91,7 +68,7 @@ export default function AdminDashboard({
     loadAdminBackendState();
   }, [liveComplaints.length]);
 
-  // Combine live user-submitted complaints with reference complaints
+  // Combine live user-submitted complaints with backend complaints
   const mergedComplaints = React.useMemo(() => {
     const existingIds = new Set(adminComplaints.map((c) => String(c.id).replace(/^#/, '')));
     const normalizedLive = (liveComplaints || [])
@@ -99,15 +76,23 @@ export default function AdminDashboard({
       .map((lc) => ({
         ...lc,
         id: lc.id.startsWith('CMP-') || lc.id.startsWith('CC') ? lc.id : `CMP-${lc.id}`,
-        municipality: lc.municipality || lc.location?.split(',')[0] || 'Indore',
-        municipalityFull: lc.municipalityFull || 'Indore Municipal Corporation',
+        municipality: lc.municipality || lc.location?.split(',')[0] || 'Municipal Zone',
+        municipalityFull: lc.municipalityFull || lc.location || 'Municipal Corporation',
         reportedDate: lc.reportedDate || lc.reported || 'Today',
         aiConfidence: parseInt(String(lc.confidence || '94'), 10) || 94
       }));
-    return [...normalizedLive, ...adminComplaints];
+    return [...normalizedLive, ...adminComplaints].map((c) => ({
+      ...c,
+      municipality: c.municipality || c.location?.split(',')[0] || 'Municipal Zone',
+      municipalityFull: c.municipalityFull || c.location || 'Municipal Corporation',
+      reportedDate: c.reportedDate || c.reported || 'Today',
+      aiConfidence: parseInt(String(c.aiConfidence || c.confidence || '94'), 10) || 94
+    }));
   }, [liveComplaints, adminComplaints]);
 
   const pendingOfficerCount = officers.filter((o) => !o.adminVerified).length;
+  const unreadNotifCount =
+    (liveNotifications || []).filter((n) => !n.read).length + pendingOfficerCount;
 
   const handleSelectComplaint = (complaint) => {
     setSelectedDossier(complaint);
@@ -214,7 +199,12 @@ export default function AdminDashboard({
     { id: 'citizens', label: 'Citizen Management', icon: Users },
     { id: 'ai-analytics', label: 'AI Analytics', icon: Cpu },
     { id: 'reports', label: 'Reports & Analytics', icon: BarChart3 },
-    { id: 'notifications', label: 'Notifications', icon: Bell, badge: 5 },
+    {
+      id: 'notifications',
+      label: 'Notifications',
+      icon: Bell,
+      badge: unreadNotifCount > 0 ? unreadNotifCount : null
+    },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
@@ -334,7 +324,7 @@ export default function AdminDashboard({
           <div className="flex items-center gap-4 flex-1 max-w-2xl justify-end">
             <div className="hidden xl:inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-semibold text-emerald-800 whitespace-nowrap">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>Live Network Sync · 14 Municipalities Online</span>
+              <span>Live Network Sync · {municipalities.length} Municipalities Online</span>
             </div>
 
             <div className="relative flex-1 max-w-xs">
@@ -589,37 +579,25 @@ export default function AdminDashboard({
                     </div>
                   ))}
 
-                {[
-                  {
-                    id: 'AN-1',
-                    title: 'High-Priority Road Hazard Escalated (CMP-10245)',
-                    desc: 'Seoni Municipal Council · Ward 14 main bus stand pothole flagged at 92% AI confidence.',
-                    time: '15 mins ago'
-                  },
-                  {
-                    id: 'AN-2',
-                    title: 'Municipal Officer Account Verification Enforced',
-                    desc: 'Two-tier verification gate active across all 14 connected municipal nodes.',
-                    time: '1 hour ago'
-                  },
-                  {
-                    id: 'AN-3',
-                    title: 'Daily MeitY GovCloud Snapshot Completed',
-                    desc: 'Encrypted database backup and SLA audit ledger archived.',
-                    time: '3 hours ago'
-                  }
-                ].map((n) => (
+                {(liveNotifications || []).map((n) => (
                   <div
                     key={n.id}
                     className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between"
                   >
                     <div>
                       <div className="font-bold text-slate-900">{n.title}</div>
-                      <div className="text-slate-500 mt-0.5">{n.desc}</div>
+                      <div className="text-slate-500 mt-0.5">{n.message || n.desc}</div>
                     </div>
-                    <span className="text-[11px] font-mono text-slate-400">{n.time}</span>
+                    <span className="text-[11px] font-mono text-slate-400">{n.time || 'Live'}</span>
                   </div>
                 ))}
+
+                {officers.filter((o) => !o.adminVerified).length === 0 &&
+                  (liveNotifications || []).length === 0 && (
+                    <div className="p-8 rounded-xl bg-slate-50 border border-slate-200 text-center text-slate-400">
+                      0 Notifications — All officer verification queues and platform alerts are clear.
+                    </div>
+                  )}
               </div>
             </div>
           )}

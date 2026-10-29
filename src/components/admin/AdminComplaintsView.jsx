@@ -30,18 +30,35 @@ export default function AdminComplaintsView({
   onRefresh,
   onShowToast
 }) {
-  const [searchQuery, setSearchQuery] = useState('CMP-');
+  const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Statuses');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [priorityFilter, setPriorityFilter] = useState('All Priorities');
   const [municipalityFilter, setMunicipalityFilter] = useState('All Municipalities');
-  const [selectedIds, setSelectedIds] = useState(['CMP-10245', 'CMP-10244']);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [openMenuId, setOpenMenuId] = useState(null);
   const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false);
   const [bulkDepartment, setBulkDepartment] = useState('Public Works & Roads (PWD)');
   const [bulkStatus, setBulkStatus] = useState('In Progress');
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  const pendingCount = useMemo(
+    () => complaints.filter((c) => ['pending', 'reported'].includes(String(c.status || '').toLowerCase())).length,
+    [complaints]
+  );
+  const inProgressCount = useMemo(
+    () => complaints.filter((c) => ['in progress', 'assigned'].includes(String(c.status || '').toLowerCase())).length,
+    [complaints]
+  );
+  const resolvedCount = useMemo(
+    () => complaints.filter((c) => String(c.status || '').toLowerCase() === 'resolved').length,
+    [complaints]
+  );
+  const activeMunicipalityCount = useMemo(
+    () => new Set(complaints.map((c) => c.municipality || c.location?.split(',')[0]).filter(Boolean)).size,
+    [complaints]
+  );
 
   const filteredComplaints = useMemo(() => {
     return complaints.filter((c) => {
@@ -176,7 +193,7 @@ export default function AdminComplaintsView({
         </div>
       </div>
 
-      {/* 4 KPI Cards matching Image 12 */}
+      {/* 4 KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">
@@ -186,9 +203,11 @@ export default function AdminComplaintsView({
             </div>
           </div>
           <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
-            {(12845 + Math.max(0, complaints.length - 7)).toLocaleString()}
+            {complaints.length.toLocaleString()}
           </div>
-          <p className="text-[11px] text-slate-500">Total registered across 14 municipalities</p>
+          <p className="text-[11px] text-slate-500">
+            Total registered across {activeMunicipalityCount} {activeMunicipalityCount === 1 ? 'municipality' : 'municipalities'}
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
@@ -198,7 +217,9 @@ export default function AdminComplaintsView({
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">1,284</div>
+          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
+            {pendingCount.toLocaleString()}
+          </div>
           <p className="text-[11px] text-slate-500">Awaiting department triage</p>
         </div>
 
@@ -209,7 +230,9 @@ export default function AdminComplaintsView({
               <FileText className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">1,325</div>
+          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
+            {inProgressCount.toLocaleString()}
+          </div>
           <p className="text-[11px] text-slate-500">Active field work assigned</p>
         </div>
 
@@ -220,7 +243,9 @@ export default function AdminComplaintsView({
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">10,236</div>
+          <div className="text-3xl font-extrabold text-slate-900 tabular-nums">
+            {resolvedCount.toLocaleString()}
+          </div>
           <p className="text-[11px] text-slate-500">Successfully closed &amp; verified</p>
         </div>
       </div>
@@ -377,7 +402,14 @@ export default function AdminComplaintsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredComplaints.map((c) => {
+              {filteredComplaints.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-10 text-center text-slate-400">
+                    No complaints found in Supabase database.
+                  </td>
+                </tr>
+              ) : (
+                filteredComplaints.map((c) => {
                 const isSelected = selectedIds.includes(c.id);
                 const confNum =
                   typeof c.aiConfidence === 'number'
@@ -510,7 +542,8 @@ export default function AdminComplaintsView({
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
@@ -518,9 +551,13 @@ export default function AdminComplaintsView({
         {/* Footer Pagination */}
         <div className="px-5 py-3.5 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
           <div>
-            Showing <strong className="text-slate-900">1–{filteredComplaints.length}</strong> of{' '}
+            Showing{' '}
+            <strong className="text-slate-900">
+              {filteredComplaints.length === 0 ? 0 : `1–${filteredComplaints.length}`}
+            </strong>{' '}
+            of{' '}
             <strong className="text-slate-900 tabular-nums">
-              {(12845 + Math.max(0, complaints.length - 7)).toLocaleString()}
+              {complaints.length.toLocaleString()}
             </strong>{' '}
             complaints
           </div>
@@ -550,31 +587,12 @@ export default function AdminComplaintsView({
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              {[1, 2, 3].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setCurrentPage(p)}
-                  className={`w-8 h-8 rounded-lg font-bold cursor-pointer ${
-                    currentPage === p
-                      ? 'bg-blue-600 text-white'
-                      : 'border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-              <span className="px-1">...</span>
               <button
                 type="button"
-                onClick={() => setCurrentPage(1835)}
-                className={`px-2 h-8 rounded-lg font-semibold tabular-nums cursor-pointer ${
-                  currentPage === 1835
-                    ? 'bg-blue-600 text-white'
-                    : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
+                onClick={() => setCurrentPage(1)}
+                className="w-8 h-8 rounded-lg font-bold bg-blue-600 text-white cursor-pointer"
               >
-                1,835
+                1
               </button>
               <button
                 type="button"

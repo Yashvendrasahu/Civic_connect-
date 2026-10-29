@@ -30,6 +30,7 @@ import {
 
 export default function AuthPage({
   initialMode = 'login', // 'login' | 'register' | 'forgot'
+  complaints = [],
   onNavigate,
   onLoginSuccess,
   onShowToast
@@ -39,16 +40,16 @@ export default function AuthPage({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Form states
-  const [email, setEmail] = useState('rajesh.sharma@indore.gov.in');
-  const [password, setPassword] = useState('CivicConnect#2026');
+  // Form states (Start blank — no pre-filled demo credentials)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('+91 98765 43210');
-  const [cityArea, setCityArea] = useState('Indore, Sector 4');
+  const [phone, setPhone] = useState('');
+  const [cityArea, setCityArea] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [department, setDepartment] = useState('Roads & Public Works');
-  const [officerId, setOfficerId] = useState('IND-PWD-8429');
-  const [municipality, setMunicipality] = useState('Indore Municipal Corporation');
+  const [officerId, setOfficerId] = useState('');
+  const [municipality, setMunicipality] = useState('');
   const [agreedTerms, setAgreedTerms] = useState(true);
   const [rememberMe, setRememberMe] = useState(true);
   const [formError, setFormError] = useState('');
@@ -56,6 +57,11 @@ export default function AuthPage({
   const [resetSentMessage, setResetSentMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationSuccess, setVerificationSuccess] = useState(false);
+
+  const totalComplaints = complaints.length;
+  const resolvedComplaints = complaints.filter((c) => c.status === 'Resolved').length;
+  const resolutionRate =
+    totalComplaints > 0 ? `${Math.round((resolvedComplaints / totalComplaints) * 100)}%` : '0%';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -290,71 +296,47 @@ export default function AuthPage({
                 )}
               </div>
 
-              {/* Incidents or Officer stats */}
+              {/* Incidents or Officer stats (Dynamic from live Supabase complaints) */}
               {selectedRole === 'officer' && authMode === 'register' ? (
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-slate-50">
-                    <div className="text-[11px] text-slate-500">Assigned Wards</div>
-                    <div className="font-bold text-slate-900 text-sm mt-0.5">Ward 4 & 12</div>
-                    <div className="text-[10px] text-rose-600 font-medium">High Priority Sector</div>
+                    <div className="text-[11px] text-slate-500">Live Complaints</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">{totalComplaints}</div>
+                    <div className="text-[10px] text-blue-600 font-medium">Synced via Supabase</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50">
-                    <div className="text-[11px] text-slate-500">Avg Turnaround</div>
-                    <div className="font-bold text-slate-900 text-sm mt-0.5">2.4h</div>
-                    <div className="text-[10px] text-blue-600 font-medium">38% Faster than SLA</div>
+                    <div className="text-[11px] text-slate-500">Resolved Cases</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">{resolvedComplaints}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium">Verified Closures</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50">
                     <div className="text-[11px] text-slate-500">Resolution Rate</div>
-                    <div className="font-bold text-slate-900 text-sm mt-0.5">96.2%</div>
-                    <div className="text-[10px] text-emerald-600 font-medium">Verified by Citizens</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">{resolutionRate}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium">Live SLA Ratio</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50">
-                    <div className="text-[11px] text-slate-500">Active Officers</div>
-                    <div className="font-bold text-slate-900 text-sm mt-0.5">1,420+</div>
-                    <div className="text-[10px] text-slate-600 font-medium">On-Duty Across Zone</div>
+                    <div className="text-[11px] text-slate-500">In Progress</div>
+                    <div className="font-bold text-slate-900 text-sm mt-0.5">
+                      {Math.max(0, totalComplaints - resolvedComplaints)}
+                    </div>
+                    <div className="text-[10px] text-slate-600 font-medium">Active Queue</div>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-2.5 text-xs">
-                  <div className="p-2.5 rounded-xl bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-start gap-2.5">
-                      <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5" />
-                      <div>
-                        <div className="font-bold text-slate-900">Pothole Detected Sector 4-B</div>
-                        <div className="text-[11px] text-slate-500">Geo-coordinates 22.7196° N, 75.8577° E</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">
-                      AI Tagged
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-50 flex items-center justify-between">
-                    <div className="flex items-start gap-2.5">
-                      <Lightbulb className="w-4 h-4 text-sky-500 mt-0.5" />
-                      <div>
-                        <div className="font-bold text-slate-900">Streetlight #842 Restored</div>
-                        <div className="text-[11px] text-slate-500">Ward 18 • Public Works Dept</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                      Team Assigned
-                    </span>
-                  </div>
-
                   {/* 3 Metrics Footer */}
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center">
+                  <div className="grid grid-cols-3 gap-2 pt-1 text-center">
                     <div>
-                      <div className="font-extrabold text-slate-900 text-sm">94.8%</div>
+                      <div className="font-extrabold text-slate-900 text-sm">{resolutionRate}</div>
                       <div className="text-[10px] text-slate-500">Resolution Rate</div>
                     </div>
                     <div>
-                      <div className="font-extrabold text-slate-900 text-sm">2.4h</div>
-                      <div className="text-[10px] text-slate-500">Avg Response</div>
+                      <div className="font-extrabold text-slate-900 text-sm">{totalComplaints}</div>
+                      <div className="text-[10px] text-slate-500">Issues Logged</div>
                     </div>
                     <div>
-                      <div className="font-extrabold text-slate-900 text-sm">52.8k</div>
-                      <div className="text-[10px] text-slate-500">Active Citizens</div>
+                      <div className="font-extrabold text-slate-900 text-sm">{resolvedComplaints}</div>
+                      <div className="text-[10px] text-slate-500">Resolved</div>
                     </div>
                   </div>
                 </div>
@@ -384,16 +366,6 @@ export default function AuthPage({
                     setAuthMode('login');
                     setFormError('');
                     setAdminVerificationBlock(null);
-                    if (!email) {
-                      setEmail(
-                        selectedRole === 'officer'
-                          ? 'rajesh.sharma@indore.gov.in'
-                          : 'priya.sharma@example.com'
-                      );
-                      setPassword(
-                        selectedRole === 'officer' ? 'CivicConnect#2026' : 'PriyaSecure#2026'
-                      );
-                    }
                   }}
                   className={`py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                     authMode === 'login'
@@ -410,14 +382,6 @@ export default function AuthPage({
                     setAuthMode('register');
                     setFormError('');
                     setAdminVerificationBlock(null);
-                    if (
-                      email === 'rajesh.sharma@indore.gov.in' ||
-                      email === 'priya.sharma@example.com'
-                    ) {
-                      setEmail('');
-                      setPassword('');
-                      setConfirmPassword('');
-                    }
                   }}
                   className={`py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                     authMode === 'register'
@@ -625,13 +589,6 @@ export default function AuthPage({
                             setSelectedRole('citizen');
                             setFormError('');
                             setAdminVerificationBlock(null);
-                            if (
-                              authMode === 'login' &&
-                              (!email || email === 'rajesh.sharma@indore.gov.in')
-                            ) {
-                              setEmail('priya.sharma@example.com');
-                              setPassword('PriyaSecure#2026');
-                            }
                           }}
                           className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
                             selectedRole === 'citizen'
@@ -661,13 +618,6 @@ export default function AuthPage({
                             setSelectedRole('officer');
                             setFormError('');
                             setAdminVerificationBlock(null);
-                            if (
-                              authMode === 'login' &&
-                              (!email || email === 'priya.sharma@example.com')
-                            ) {
-                              setEmail('rajesh.sharma@indore.gov.in');
-                              setPassword('CivicConnect#2026');
-                            }
                           }}
                           className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
                             selectedRole === 'officer'

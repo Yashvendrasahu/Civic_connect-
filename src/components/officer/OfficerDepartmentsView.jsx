@@ -18,14 +18,44 @@ import {
   Clock
 } from 'lucide-react';
 
-export default function OfficerDepartmentsView({ officerProfile, onShowToast }) {
+export default function OfficerDepartmentsView({ officerProfile, complaints = [], onShowToast }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('All Divisions');
   const [capacityFilter, setCapacityFilter] = useState('All Capacities');
   const [shiftFilter, setShiftFilter] = useState('All Shifts / States');
   const [activeModal, setActiveModal] = useState(null); // null | 'matrix' | 'shifts' | divisionObject
 
-  const filteredDivisions = MUNICIPAL_DIVISIONS.filter((d) => {
+  const dynamicDivisions = MUNICIPAL_DIVISIONS.map((d) => {
+    const keyword = d.name.split(' ')[0].toLowerCase();
+    const matching = complaints.filter((c) =>
+      `${c.department || ''} ${c.category || ''}`.toLowerCase().includes(keyword)
+    );
+    const resolvedCount = matching.filter((c) => c.status === 'Resolved').length;
+    const inProgCount = matching.filter(
+      (c) => c.status === 'In Progress' || c.status === 'Assigned'
+    ).length;
+    const openCount = Math.max(0, matching.length - resolvedCount);
+    const overdueCount = matching.filter(
+      (c) => c.status !== 'Resolved' && (c.slaRemaining || '').toLowerCase().includes('overdue')
+    ).length;
+    const utilization = matching.length > 0 ? Math.min(100, openCount * 15) : 0;
+    return {
+      ...d,
+      openCount,
+      inProgCount,
+      resolvedCount,
+      overdueCount,
+      squadsCount: inProgCount,
+      utilization,
+      utilizationLabel: `${utilization}% Bandwidth Load`
+    };
+  });
+
+  const totalOpenComplaints = dynamicDivisions.reduce((sum, d) => sum + d.openCount, 0);
+  const totalActiveSquads = dynamicDivisions.reduce((sum, d) => sum + d.squadsCount, 0);
+  const totalOverdueCases = dynamicDivisions.reduce((sum, d) => sum + d.overdueCount, 0);
+
+  const filteredDivisions = dynamicDivisions.filter((d) => {
     const matchesSearch =
       !searchQuery ||
       d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -146,7 +176,7 @@ export default function OfficerDepartmentsView({ officerProfile, onShowToast }) 
         </div>
       </div>
 
-      {/* 4 KPI Summary Cards */}
+      {/* 4 KPI Summary Cards (100% Dynamic from Supabase complaints) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between">
@@ -154,11 +184,13 @@ export default function OfficerDepartmentsView({ officerProfile, onShowToast }) 
               TOTAL DEPARTMENTS
             </span>
             <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold">
-              100% Operational
+              Operational
             </span>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">8 Active</div>
-          <p className="text-[11px] text-slate-500 mt-1">Integrated on IMC Command Bus</p>
+          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">
+            {dynamicDivisions.length} Divisions
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">Integrated on Municipal Command Bus</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
@@ -167,11 +199,13 @@ export default function OfficerDepartmentsView({ officerProfile, onShowToast }) 
               ACTIVE FIELD SQUADS
             </span>
             <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold">
-              +3 Reserves
+              Live Telemetry
             </span>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">34 Teams</div>
-          <p className="text-[11px] text-slate-500 mt-1">GPS Telemetry Active Across Zone 4</p>
+          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">
+            {totalActiveSquads} Teams
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">Deployed on active work orders</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
@@ -180,11 +214,13 @@ export default function OfficerDepartmentsView({ officerProfile, onShowToast }) 
               OPEN COMPLAINTS
             </span>
             <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 text-[10px] font-bold">
-              High Dispatch Load
+              Live Queue
             </span>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">194 Active</div>
-          <p className="text-[11px] text-slate-500 mt-1">Across Wards 18 to 24</p>
+          <div className="text-2xl font-extrabold text-slate-900 font-mono mt-2">
+            {totalOpenComplaints} Active
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">Synced from Supabase complaints</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
@@ -193,11 +229,15 @@ export default function OfficerDepartmentsView({ officerProfile, onShowToast }) 
               OVERDUE CASES
             </span>
             <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 text-[10px] font-bold">
-              Action Req.
+              SLA Monitor
             </span>
           </div>
-          <div className="text-2xl font-extrabold text-rose-600 font-mono mt-2">7 SLA Alerts</div>
-          <p className="text-[11px] text-rose-600 font-medium mt-1">3 in Roads & Infrastructure</p>
+          <div className="text-2xl font-extrabold text-rose-600 font-mono mt-2">
+            {totalOverdueCases} SLA Alerts
+          </div>
+          <p className="text-[11px] text-rose-600 font-medium mt-1">
+            {totalOverdueCases === 0 ? '0 overdue complaints' : 'Immediate attention required'}
+          </p>
         </div>
       </div>
 

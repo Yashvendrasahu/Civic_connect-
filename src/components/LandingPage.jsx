@@ -30,10 +30,21 @@ import {
   FolderOpen
 } from 'lucide-react';
 
-export default function LandingPage({ onNavigate, onOpenReportModal, onTrackTicket, currentUser, onLogout }) {
+export default function LandingPage({
+  onNavigate,
+  onOpenReportModal,
+  onTrackTicket,
+  currentUser,
+  complaints = [],
+  onLogout
+}) {
   const [activeNav, setActiveNav] = useState('platform');
-
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const totalLogged = complaints.length;
+  const totalResolved = complaints.filter((c) => c.status === 'Resolved').length;
+  const resolutionRate =
+    totalLogged > 0 ? `${Math.round((totalResolved / totalLogged) * 100)}%` : '0%';
 
   const scrollToSection = (id) => {
     setMobileMenuOpen(false);
@@ -798,7 +809,9 @@ export default function LandingPage({ onNavigate, onOpenReportModal, onTrackTick
                 <span>TOTAL LOGGED</span>
                 <FolderOpen className="w-4 h-4" />
               </div>
-              <div className="text-4xl font-extrabold text-slate-900 tracking-tight">10K+</div>
+              <div className="text-4xl font-extrabold text-slate-900 tracking-tight tabular-nums">
+                {totalLogged}
+              </div>
               <div>
                 <div className="text-xs font-bold text-slate-700">Issues Reported</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">Logged by active citizens across wards</div>
@@ -811,7 +824,9 @@ export default function LandingPage({ onNavigate, onOpenReportModal, onTrackTick
                 <span>COMPLETED</span>
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               </div>
-              <div className="text-4xl font-extrabold text-slate-900 tracking-tight">5K+</div>
+              <div className="text-4xl font-extrabold text-slate-900 tracking-tight tabular-nums">
+                {totalResolved}
+              </div>
               <div>
                 <div className="text-xs font-bold text-slate-700">Issues Resolved</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">Verified with post-fix imagery & sign-off</div>
@@ -824,7 +839,9 @@ export default function LandingPage({ onNavigate, onOpenReportModal, onTrackTick
                 <span>EFFICIENCY</span>
                 <Activity className="w-4 h-4 text-blue-500" />
               </div>
-              <div className="text-4xl font-extrabold text-slate-900 tracking-tight">95%</div>
+              <div className="text-4xl font-extrabold text-slate-900 tracking-tight tabular-nums">
+                {resolutionRate}
+              </div>
               <div>
                 <div className="text-xs font-bold text-slate-700">Resolution Rate</div>
                 <div className="text-[11px] text-slate-500 mt-0.5">Within standard municipal SLA windows</div>

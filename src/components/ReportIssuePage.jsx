@@ -39,7 +39,7 @@ export default function ReportIssuePage({
   onShowToast
 }) {
   // Step state: 1: Details Entry, 2: AI Analysis, 3: Review, 4: Confirmed
-  const [currentStep, setCurrentStep] = useState(2); // default to step 2 to showcase the exact screen!
+  const [currentStep, setCurrentStep] = useState(1);
   const [isConfirmedCheckbox, setIsConfirmedCheckbox] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLocatingGps, setIsLocatingGps] = useState(false);
@@ -54,22 +54,22 @@ export default function ReportIssuePage({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Form values
+  // Form values (Starts blank for title & statement; location auto-populates from live GPS)
   const [formData, setFormData] = useState({
-    title: 'Large Pothole on Main Road',
+    title: '',
     category: 'Roads & Infrastructure',
     issueType: 'Pothole / Road Damage',
     subType: 'Asphalt Void',
     severity: 'High (Traffic & Public Safety Hazard)',
     priorityTier: 'Priority 1 (Urgent 24h)',
-    department: 'Roads & Infrastructure Department (PWD Indore)',
-    assignedTeam: 'PWD Indore Field Team #04 (Indore Central)',
-    ward: 'Ward 18, Zone 4',
-    address: 'Vijay Nagar Main Rd, Scheme 54, Indore, Madhya Pradesh 452010',
-    shortLocation: 'Vijay Nagar Square, Near Orbit Mall, Indore',
-    geo: '22.7533° N, 75.8937° E',
-    precision: '±3.2m (High Reliability)',
-    citizenStatement: 'Deep hazardous road pothole with exposed gravel near Vijay Nagar Square right next to the metro pillar. Causing serious two-wheeler skids and bottleneck during peak hours.',
+    department: 'Roads & Infrastructure Department',
+    assignedTeam: 'Municipal Field Response Unit',
+    ward: 'Detecting Ward...',
+    address: 'Auto-detecting live GPS address...',
+    shortLocation: 'Detecting live location...',
+    geo: 'Detecting GPS coordinates...',
+    precision: 'Acquiring GPS lock...',
+    citizenStatement: '',
     confidence: '94%',
     aiModel: 'Neural Model v4.2',
     image: 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=1200&q=80',
@@ -143,7 +143,7 @@ export default function ReportIssuePage({
     } catch (e) {}
 
     const complaintPayload = {
-      title: formData.title,
+      title: formData.title.trim() || `${formData.issueType} at ${formData.shortLocation}`,
       category: formData.category,
       location: formData.shortLocation || formData.address,
       address: formData.address,
@@ -154,10 +154,12 @@ export default function ReportIssuePage({
       department: formData.department,
       assignedTeam: formData.assignedTeam,
       confidence: formData.confidence,
-      aiDetected: 'Road Damage / Asphalt Crater',
-      dimensions: '45cm Asphalt Crater',
+      aiDetected: formData.issueType || 'Civic Infrastructure Defect',
+      dimensions: 'Verified Field Scope',
       image: formData.image,
-      description: formData.citizenStatement
+      description: formData.citizenStatement.trim() || `Citizen reported ${formData.issueType} at ${formData.address}.`,
+      citizenName: currentUser?.name || 'Citizen Reporter',
+      citizenEmail: currentUser?.email || ''
     };
 
     onSubmitSuccess(complaintPayload);

@@ -316,6 +316,35 @@ export default function App() {
     }
   };
 
+  // Strict Citizen Scoping: Citizens see only their own records; Officers & Admin see platform data
+  const userEmailLower = (currentUser?.email || '').trim().toLowerCase();
+  const citizenComplaints =
+    currentUser?.role === 'officer' || currentUser?.role === 'admin'
+      ? complaints
+      : userEmailLower
+      ? complaints.filter((c) => (c.citizenEmail || '').trim().toLowerCase() === userEmailLower)
+      : [];
+
+  const citizenTicketIds = new Set(
+    citizenComplaints.map((c) => String(c.id || '').replace(/^#/, ''))
+  );
+
+  const citizenNotifications =
+    currentUser?.role === 'officer' || currentUser?.role === 'admin'
+      ? notifications
+      : notifications.filter((n) => {
+          const tId = String(n.ticketId || '').replace(/^#/, '');
+          return tId && citizenTicketIds.has(tId);
+        });
+
+  const citizenTimelineUpdates =
+    currentUser?.role === 'officer' || currentUser?.role === 'admin'
+      ? timelineUpdates
+      : timelineUpdates.filter((u) => {
+          const tId = String(u.ticketId || '').replace(/^#/, '');
+          return tId && citizenTicketIds.has(tId);
+        });
+
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-['Plus_Jakarta_Sans',sans-serif] relative">
       {/* Hidden Global Evidence Photo File Picker */}
@@ -339,9 +368,9 @@ export default function App() {
       {activeView === 'my-complaints' && (
         <MyComplaintsPage
           currentUser={currentUser}
-          complaints={complaints}
-          timelineUpdates={timelineUpdates}
-          notifications={notifications}
+          complaints={citizenComplaints}
+          timelineUpdates={citizenTimelineUpdates}
+          notifications={citizenNotifications}
           onNavigate={handleNavigate}
           onOpenReportModal={() => setActiveView('report-issue')}
           onSelectTicket={(ticket) => setSelectedTicket(ticket)}
@@ -359,7 +388,7 @@ export default function App() {
       {activeView === 'report-issue' && (
         <ReportIssuePage
           currentUser={currentUser}
-          notifications={notifications}
+          notifications={citizenNotifications}
           onNavigate={handleNavigate}
           onSubmitSuccess={handleReportSubmitSuccess}
           onShowToast={showToast}
@@ -369,7 +398,11 @@ export default function App() {
       {activeView === 'profile-settings' && (
         <ProfileSettingsPage
           currentUser={currentUser}
-          notifications={notifications}
+          notifications={
+            currentUser?.role === 'officer' || currentUser?.role === 'admin'
+              ? notifications
+              : citizenNotifications
+          }
           onNavigate={handleNavigate}
           onSwitchUserRole={handleSwitchUserRole}
           onUpdateCurrentUser={handleUpdateCurrentUser}
@@ -381,6 +414,7 @@ export default function App() {
       {activeView === 'landing' && (
         <LandingPage
           currentUser={currentUser}
+          complaints={complaints}
           onNavigate={handleNavigate}
           onLogout={handleLogout}
           onOpenReportModal={() => setActiveView('report-issue')}
@@ -391,8 +425,8 @@ export default function App() {
       {activeView === 'dashboard' && (
         <CitizenDashboard
           currentUser={currentUser}
-          complaints={complaints}
-          notifications={notifications}
+          complaints={citizenComplaints}
+          notifications={citizenNotifications}
           onNavigate={handleNavigate}
           onOpenReportModal={() => setActiveView('report-issue')}
           onSelectTicket={(ticket) => setSelectedTicket(ticket)}
@@ -422,6 +456,7 @@ export default function App() {
       {(activeView === 'login' || activeView === 'register') && (
         <AuthPage
           initialMode={authMode}
+          complaints={complaints}
           onNavigate={handleNavigate}
           onLoginSuccess={handleLoginSuccess}
           onShowToast={showToast}
@@ -467,7 +502,7 @@ export default function App() {
         isOpen={isCertificateModalOpen}
         onClose={() => setIsCertificateModalOpen(false)}
         user={currentUser}
-        complaints={complaints}
+        complaints={citizenComplaints}
       />
 
       {/* Global Multi-Turn Supabase RAG + Google Maps Grounding AI Assistant */}
