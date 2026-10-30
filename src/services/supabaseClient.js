@@ -1298,7 +1298,7 @@ export const civicDataService = {
     return {
       reply: `📊 **Live Supabase RAG Data:** कुल **${allComplaints.length}** शिकायतें (Resolved: **${resolved}**, In Progress: **${inProgress}**, Pending: **${pending}**)\n\n${summaryLines}`,
       model: `${model} (Direct Supabase RAG)`,
-      supabaseConnected: isRealSupabaseConfigured,
+      supabaseConnected: Boolean(activeCredentials.isRealCloud),
       ragStats: {
         totalComplaints: allComplaints.length,
         resolvedCount: resolved,

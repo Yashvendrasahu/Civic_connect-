@@ -1357,10 +1357,12 @@ app.post('/api/complaints/:id/worklog', optionalAuth, async (req, res) => {
 // 7d. Upload Evidence Photo to Complaint (Supabase Storage + Base64 Fallback)
 app.post('/api/complaints/:id/photos', optionalAuth, async (req, res) => {
   const cleanId = req.params.id.replace('#', '').trim();
-  const { photoDataUrl, caption, author, role } = req.body;
+  const photoDataUrl = req.body.photoDataUrl || req.body.image;
+  const caption = req.body.caption || req.body.note;
+  const { author, role, replacePrimary = true } = req.body;
 
   if (!photoDataUrl) {
-    return res.status(400).json({ error: 'photoDataUrl is required' });
+    return res.status(400).json({ error: 'photoDataUrl or image is required' });
   }
 
   let finalPhotoUrl = photoDataUrl;
@@ -1410,7 +1412,10 @@ app.post('/api/complaints/:id/photos', optionalAuth, async (req, res) => {
   };
 
   if (ticket) {
-    ticket.image = finalPhotoUrl;
+    if (replacePrimary !== false) {
+      ticket.image = finalPhotoUrl;
+    }
+    ticket.photos = Array.from(new Set([finalPhotoUrl, ...(ticket.photos || []), ticket.image].filter(Boolean)));
     ticket.workLogs = [photoLog, ...(ticket.workLogs || [])];
   }
 
@@ -1431,7 +1436,7 @@ app.post('/api/complaints/:id/photos', optionalAuth, async (req, res) => {
       await req.supabase
         .from('complaints')
         .update({
-          image: finalPhotoUrl,
+          image: ticket.image || finalPhotoUrl,
           work_logs: ticket.workLogs,
           updated_at: new Date().toISOString()
         })
@@ -1451,10 +1456,12 @@ app.post('/api/complaints/:id/photos', optionalAuth, async (req, res) => {
     }
   }
 
+  const resolvedTicket = ticket || { id: cleanId, image: finalPhotoUrl, photos: [finalPhotoUrl] };
   res.status(201).json({
     photoUrl: finalPhotoUrl,
     workLog: photoLog,
-    ticket: ticket || { id: cleanId, image: finalPhotoUrl }
+    ticket: resolvedTicket,
+    complaint: resolvedTicket
   });
 });
 
@@ -1500,7 +1507,8 @@ app.post('/api/complaints/batch', optionalAuth, async (req, res) => {
   res.json({
     message: `Batch updated ${cleanIds.length} complaints`,
     updatedIds: cleanIds,
-    tickets: updatedTickets
+    tickets: updatedTickets,
+    complaints: db.complaints
   });
 });
 
@@ -3235,13 +3243,18 @@ app.post('/api/ai/rag-chat', optionalAuth, async (req, res) => {
     qLower.includes('direction');
 
   // Allowed models per @google/genai guidelines:
-  // If Maps Grounding is used, MUST use 'gemini-3.8-flash' with googleMaps tool
-  const validModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-4-argon'];
+  // If Maps Grounding is used, MUST use 'gemini-2.5-flash' with googleMaps tool
+  const modelAliasMap = {
+    'gemini-3.8-flash': 'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite': 'gemini-3-flash-preview',
+    'gemini-4-argon': 'gemini-3.1-pro-preview',
+    'gemini-3-flash-preview': 'gemini-3-flash-preview',
+    'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
+    'gemini-2.5-flash': 'gemini-2.5-flash'
+  };
   const selectedModel = isLocationQuery
-    ? 'gemini-3.8-flash'
-    : validModels.includes(requestedModel)
-    ? requestedModel
-    : 'gemini-3.8-flash';
+    ? 'gemini-2.5-flash'
+    : modelAliasMap[requestedModel] || 'gemini-3-flash-preview';
 
   const systemInstruction = `You are the official "Civic Connect AI Assistant" (Powered by Live Supabase RAG & Google Maps Grounding) for the CIRRS (Civic Issue Reporting & Resolution System) platform.
 You help Citizens, Municipal Officers, and Super Admins in Hindi, Hinglish, and English (match the user's language).

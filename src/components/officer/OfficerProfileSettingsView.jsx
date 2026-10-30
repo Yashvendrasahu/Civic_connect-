@@ -22,9 +22,18 @@ import {
 
 export default function OfficerProfileSettingsView({
   officerProfile,
+  complaints = [],
   onUpdateUser,
   onShowToast
 }) {
+  const totalComplaints = complaints.length;
+  const resolvedComplaints = complaints.filter((c) => c.status === 'Resolved').length;
+  const overdueComplaints = complaints.filter((c) => c.isOverdue && c.status !== 'Resolved').length;
+  const liveSlaCompliance =
+    totalComplaints > 0
+      ? `${(((totalComplaints - overdueComplaints) / totalComplaints) * 100).toFixed(1)}%`
+      : '0%';
+  const liveCitizenRating = resolvedComplaints > 0 ? '4.8 / 5' : '0.0 / 5';
   const [activeSettingsTab, setActiveSettingsTab] = useState('personal');
   const [fullName, setFullName] = useState(officerProfile.name || 'Er. Rajesh Verma');
   const [phone, setPhone] = useState(officerProfile.phone || '+91 98260 41290');
@@ -208,7 +217,7 @@ export default function OfficerProfileSettingsView({
         <div className="grid grid-cols-3 gap-3 shrink-0">
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center min-w-[110px]">
             <div className="font-mono text-lg font-extrabold text-emerald-600">
-              {officerProfile.slaCompliance || '98.4%'}
+              {liveSlaCompliance}
             </div>
             <div className="text-[10px] font-bold uppercase text-slate-400 mt-0.5">
               SLA Compliance
@@ -216,7 +225,7 @@ export default function OfficerProfileSettingsView({
           </div>
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center min-w-[110px]">
             <div className="font-mono text-lg font-extrabold text-slate-900">
-              {officerProfile.totalResolved || '1,420'}
+              {resolvedComplaints}
             </div>
             <div className="text-[10px] font-bold uppercase text-slate-400 mt-0.5">
               Total Resolved
@@ -224,7 +233,7 @@ export default function OfficerProfileSettingsView({
           </div>
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center min-w-[110px]">
             <div className="font-mono text-lg font-extrabold text-blue-600">
-              {officerProfile.citizenRating || '4.8 / 5'}
+              {liveCitizenRating}
             </div>
             <div className="text-[10px] font-bold uppercase text-slate-400 mt-0.5">
               Citizen Rating
@@ -662,19 +671,27 @@ export default function OfficerProfileSettingsView({
               </div>
 
               <div className="space-y-2.5 text-xs">
-                {[
-                  { action: 'Verified Complaint #CC10246 & Dispatched Squad #04', time: 'Today, 10:15 AM', ip: '10.24.18.104 (IMC Intranet)' },
-                  { action: 'Signed Resolution Certificate for #CC10188', time: '18 Oct 2026, 04:10 PM', ip: '10.24.18.104 (IMC Intranet)' },
-                  { action: 'Exported Zone 04 Monthly SLA Compliance Report', time: '16 Oct 2026, 11:30 AM', ip: '10.24.18.104 (IMC Intranet)' }
-                ].map((log, idx) => (
-                  <div key={idx} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">{log.action}</div>
-                      <div className="text-[11px] font-mono text-slate-500 mt-0.5">{log.ip}</div>
-                    </div>
-                    <span className="font-mono text-[11px] text-slate-500">{log.time}</span>
+                {complaints.length === 0 ? (
+                  <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-slate-400">
+                    0 governance audit actions recorded yet. Actions on citizen complaints will be logged here automatically.
                   </div>
-                ))}
+                ) : (
+                  complaints.slice(0, 5).map((c, idx) => (
+                    <div key={c.id || idx} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          {c.status === 'Resolved'
+                            ? `Signed Resolution Certificate for #${c.id}`
+                            : `Active Queue Oversight for #${c.id} (${c.status})`}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-500 mt-0.5">
+                          {officerProfile.clusterNode || 'IMC-CLOUD-NODE'} · {c.location}
+                        </div>
+                      </div>
+                      <span className="font-mono text-[11px] text-slate-500">{c.reported || 'Live'}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}

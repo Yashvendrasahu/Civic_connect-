@@ -247,7 +247,9 @@ export default function OfficerDashboard({
   const highCount = mergedComplaints.filter(
     (c) => c.status !== 'Resolved' && c.priorityLevel === 'High'
   ).length;
-  const unreadNotifCount = (notifications || []).filter((n) => n.unread).length;
+  const unreadNotifCount = (notifications || []).filter(
+    (n) => (n.unread !== undefined ? Boolean(n.unread) : !n.read)
+  ).length;
 
   // Breadcrumb label helper
   const breadcrumbLabel = {
@@ -1624,6 +1626,7 @@ export default function OfficerDashboard({
           {activeNav === 'profile-settings' && (
             <OfficerProfileSettingsView
               officerProfile={officerProfile}
+              complaints={mergedComplaints}
               onUpdateUser={handleUpdateOfficerProfile}
               onShowToast={showOfficerToast}
             />

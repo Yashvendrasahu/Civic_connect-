@@ -97,6 +97,11 @@ export default function AdminComplaintsView({
     });
   }, [complaints, searchQuery, statusFilter, categoryFilter, priorityFilter, municipalityFilter]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredComplaints.length / rowsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIdx = (safePage - 1) * rowsPerPage;
+  const paginatedComplaints = filteredComplaints.slice(startIdx, startIdx + rowsPerPage);
+
   const toggleSelectRow = (id) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
@@ -402,14 +407,14 @@ export default function AdminComplaintsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredComplaints.length === 0 ? (
+              {paginatedComplaints.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-10 text-center text-slate-400">
                     No complaints found in Supabase database.
                   </td>
                 </tr>
               ) : (
-                filteredComplaints.map((c) => {
+                paginatedComplaints.map((c) => {
                 const isSelected = selectedIds.includes(c.id);
                 const confNum =
                   typeof c.aiConfidence === 'number'
@@ -553,11 +558,13 @@ export default function AdminComplaintsView({
           <div>
             Showing{' '}
             <strong className="text-slate-900">
-              {filteredComplaints.length === 0 ? 0 : `1–${filteredComplaints.length}`}
+              {filteredComplaints.length === 0
+                ? 0
+                : `${startIdx + 1}–${Math.min(startIdx + rowsPerPage, filteredComplaints.length)}`}
             </strong>{' '}
             of{' '}
             <strong className="text-slate-900 tabular-nums">
-              {complaints.length.toLocaleString()}
+              {filteredComplaints.length.toLocaleString()}
             </strong>{' '}
             complaints
           </div>
@@ -582,22 +589,23 @@ export default function AdminComplaintsView({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
+                disabled={safePage <= 1}
+                className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer disabled:opacity-40"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 type="button"
-                onClick={() => setCurrentPage(1)}
                 className="w-8 h-8 rounded-lg font-bold bg-blue-600 text-white cursor-pointer"
               >
-                1
+                {safePage}
               </button>
               <button
                 type="button"
-                onClick={() => setCurrentPage(currentPage + 1)}
-                className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))}
+                disabled={safePage >= totalPages}
+                className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 cursor-pointer disabled:opacity-40"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

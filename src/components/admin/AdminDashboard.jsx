@@ -432,7 +432,9 @@ export default function AdminDashboard({
               className="relative p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
             >
               <Bell className="w-4 h-4" />
-              <span className="w-2 h-2 rounded-full bg-rose-500 absolute top-1.5 right-1.5" />
+              {unreadNotifCount > 0 && (
+                <span className="w-2 h-2 rounded-full bg-rose-500 absolute top-1.5 right-1.5" />
+              )}
             </button>
 
             {/* Admin Profile Pill */}
@@ -545,7 +547,11 @@ export default function AdminDashboard({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onShowToast && onShowToast('Marked all admin alerts as read')}
+                  onClick={async () => {
+                    await civicDataService.markAllNotificationsRead();
+                    await loadAdminBackendState();
+                    if (onShowToast) onShowToast('Marked all admin alerts as read');
+                  }}
                   className="px-3.5 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer"
                 >
                   Mark All Read

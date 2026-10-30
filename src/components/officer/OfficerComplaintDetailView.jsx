@@ -65,31 +65,25 @@ export default function OfficerComplaintDetailView({
   const [workStageInput, setWorkStageInput] = useState('On-Site Material Laying & Compaction');
   const [workNoteInput, setWorkNoteInput] = useState('');
   const [workLogs, setWorkLogs] = useState(
-    complaint?.workLogs?.length > 0
-      ? complaint.workLogs
-      : [
-          {
-            id: 'WL-902',
-            time: 'Today, 11:40 AM',
-            author: 'Mohan Lal Patidar (Squad Foreman #04)',
-            role: 'On-Site Execution',
-            badge: 'Bitumen Laying',
-            note: 'Site barricaded with 12 reflective cones. Loose gravel and stagnant water cleared using high-pressure air blower. Tack coat applied; hot-mix bitumen laying initiated.',
-            gps: `${complaint?.geo || '22.7533° N, 75.8937° E'} (Verified On-Site)`,
-            photos: [complaint?.image]
-          },
-          {
-            id: 'WL-901',
-            time: 'Today, 10:15 AM',
-            author: 'Er. R. K. Verma (AE - Zone 4)',
-            role: 'Crew Dispatched',
-            badge: 'Fleet Telemetry',
-            note: 'Squad #04 mobilized from Zone 4 Sub-Depot with Vehicle MP09-CZ-8821 and 2.5 tonnes hot-mix asphalt.',
-            gps: '22.7489° N, 75.8890° E',
-            photos: []
-          }
-        ]
+    Array.isArray(complaint?.workLogs) ? complaint.workLogs : []
   );
+
+  // Sync state when active complaint changes
+  useEffect(() => {
+    if (!complaint) return;
+    setSelectedDept(complaint.department || 'Roads & Infrastructure');
+    setSelectedSquad(
+      complaint.assignedSquad && !complaint.assignedSquad.includes('Unassigned')
+        ? complaint.assignedSquad
+        : 'Indore PWD Road Maintenance Squad #04'
+    );
+    setDispatchNote(
+      complaint.dispatchInstructions ||
+        'Deploy field maintenance crew and log geo-tagged progress updates.'
+    );
+    setWorkLogs(Array.isArray(complaint.workLogs) ? complaint.workLogs : []);
+    setActivePhotoIndex(0);
+  }, [complaint?.id]);
 
   // Live SLA Countdown timer for Screen 4
   const [slaSeconds, setSlaSeconds] = useState(complaint?.slaTimerSeconds || 5 * 3600 + 18 * 60 + 42);
@@ -590,42 +584,48 @@ export default function OfficerComplaintDetailView({
 
               {/* Timeline Feed of Work Logs */}
               <div className="space-y-4">
-                {workLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-200 transition-colors space-y-2"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px] font-bold">
-                          {log.id}
-                        </span>
-                        <span className="font-bold text-xs text-slate-900">{log.author}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold">
-                          {log.badge}
-                        </span>
-                      </div>
-                      <span className="text-[11px] font-mono text-slate-400">{log.time}</span>
-                    </div>
-                    <p className="text-xs text-slate-700 leading-relaxed">{log.note}</p>
-                    {Array.isArray(log.photos) && log.photos.length > 0 && (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {log.photos.filter(Boolean).map((pUrl, pIdx) => (
-                          <img
-                            key={pIdx}
-                            src={pUrl}
-                            alt="Site log"
-                            className="w-20 h-14 rounded-lg object-cover border border-slate-200"
-                          />
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                      <MapPin className="w-3 h-3 text-emerald-600" />
-                      <span>{log.gps}</span>
-                    </div>
+                {workLogs.length === 0 ? (
+                  <div className="p-6 rounded-xl border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-500">
+                    0 field updates logged yet. Use the form above to post the first geo-tagged site observation.
                   </div>
-                ))}
+                ) : (
+                  workLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-200 transition-colors space-y-2"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px] font-bold">
+                            {log.id}
+                          </span>
+                          <span className="font-bold text-xs text-slate-900">{log.author}</span>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                            {log.badge}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-mono text-slate-400">{log.time}</span>
+                      </div>
+                      <p className="text-xs text-slate-700 leading-relaxed">{log.note}</p>
+                      {Array.isArray(log.photos) && log.photos.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {log.photos.filter(Boolean).map((pUrl, pIdx) => (
+                            <img
+                              key={pIdx}
+                              src={pUrl}
+                              alt="Site log"
+                              className="w-20 h-14 rounded-lg object-cover border border-slate-200"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                        <MapPin className="w-3 h-3 text-emerald-600" />
+                        <span>{log.gps}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

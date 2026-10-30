@@ -26,7 +26,8 @@ export default function OfficerNotificationsView({
   const items = useMemo(() => {
     const rawList = Array.isArray(liveNotifications) ? liveNotifications : [];
     return rawList.map((n, idx) => {
-      const isUnread = readIds.includes(n.id) ? false : Boolean(n.unread);
+      const rawUnread = n.unread !== undefined ? Boolean(n.unread) : !n.read;
+      const isUnread = readIds.includes(n.id) ? false : rawUnread;
       const isUrgent =
         (n.title || '').toLowerCase().includes('critical') ||
         (n.title || '').toLowerCase().includes('sla') ||

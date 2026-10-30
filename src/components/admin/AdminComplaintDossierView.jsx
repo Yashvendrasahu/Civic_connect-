@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -42,24 +42,18 @@ export default function AdminComplaintDossierView({
   const [showAddNoteInput, setShowAddNoteInput] = useState(false);
 
   const [internalNotes, setInternalNotes] = useState(
-    Array.isArray(item.internalNotes) && item.internalNotes.length > 0
-      ? item.internalNotes
-      : [
-          {
-            id: 'NOTE-1',
-            author: 'R.K. Deshmukh',
-            role: 'Zonal Nodal Officer',
-            time: '28 Oct, 11:30 AM',
-            text: 'Spoke with Seoni Traffic Police Inspector. Temporary reflective barricades have been placed around the crater while cold-mix asphalt unit is being mobilized from Depot #2.'
-          },
-          {
-            id: 'NOTE-2',
-            author: 'System Audit',
-            role: 'SLA Monitor',
-            time: '28 Oct, 01:00 PM',
-            text: 'Duplicate report #CMP-10249 merged into this primary dossier. Total affected citizen upvote count increased to 18.'
-          }
-        ]
+    Array.isArray(item.internalNotes) ? item.internalNotes : []
+  );
+
+  useEffect(() => {
+    setDepartment(item.department || 'Public Works & Roads (PWD)');
+    setAssignedOfficer(item.assignedOfficer || 'Rajesh Kumar — Field Engineer (Zone 2)');
+    setSelectedStatus(item.status || 'Pending');
+    setInternalNotes(Array.isArray(item.internalNotes) ? item.internalNotes : []);
+  }, [item.id]);
+
+  const evidencePhotos = Array.from(
+    new Set([item.image, ...(Array.isArray(item.photos) ? item.photos : [])].filter(Boolean))
   );
 
   const timelineItems =
@@ -313,67 +307,53 @@ export default function AdminComplaintDossierView({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Camera className="w-4 h-4 text-blue-600" />
-                <h2 className="text-sm font-extrabold text-slate-900">Photo Evidence (2)</h2>
+                <h2 className="text-sm font-extrabold text-slate-900">
+                  Photo Evidence ({evidencePhotos.length})
+                </h2>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onShowToast) onShowToast(`Downloading original EXIF evidence package for ${displayId}`);
-                }}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
-              >
-                Download Originals (ZIP)
-              </button>
+              {evidencePhotos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onShowToast) onShowToast(`Downloading original EXIF evidence package for ${displayId}`);
+                  }}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
+                >
+                  Download Originals (ZIP)
+                </button>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Photo 1 */}
-              <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-                <div className="relative h-44 bg-slate-800">
-                  <img
-                    src={
-                      item.image ||
-                      'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=900&q=80'
-                    }
-                    alt="Primary Evidence"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                  <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-md bg-slate-900/80 text-white text-[10px] font-bold">
-                    Primary Evidence
-                  </span>
-                </div>
-                <div className="p-3 flex items-center justify-between text-[11px]">
-                  <div>
-                    <div className="font-bold text-slate-800">IMG_20261028_103912.jpg</div>
-                    <div className="text-slate-400">EXIF Verified · GPS Match (99.4%)</div>
-                  </div>
-                  <span className="text-emerald-600 font-bold">✓ Authentic</span>
-                </div>
+            {evidencePhotos.length === 0 ? (
+              <div className="p-6 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-slate-400">
+                0 photographic evidence files attached to this dossier.
               </div>
-
-              {/* Photo 2 */}
-              <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-                <div className="relative h-44 bg-slate-800">
-                  <img
-                    src="https://images.unsplash.com/photo-1584467735815-f778f274e296?auto=format&fit=crop&w=900&q=80"
-                    alt="Detail Scale Macro"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
-                  <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-md bg-slate-900/80 text-white text-[10px] font-bold">
-                    Detail Scale Macro
-                  </span>
-                </div>
-                <div className="p-3 flex items-center justify-between text-[11px]">
-                  <div>
-                    <div className="font-bold text-slate-800">IMG_20261028_104005.jpg</div>
-                    <div className="text-slate-400">Est. Diameter: 1.4m · Depth: ~14cm</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {evidencePhotos.map((photoUrl, idx) => (
+                  <div key={idx} className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                    <div className="relative h-44 bg-slate-800">
+                      <img
+                        src={photoUrl}
+                        alt={`Evidence ${idx + 1}`}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-md bg-slate-900/80 text-white text-[10px] font-bold">
+                        {idx === 0 ? 'Primary Evidence' : `Evidence #${idx + 1}`}
+                      </span>
+                    </div>
+                    <div className="p-3 flex items-center justify-between text-[11px]">
+                      <div>
+                        <div className="font-bold text-slate-800">EVIDENCE_{displayId}_{idx + 1}.jpg</div>
+                        <div className="text-slate-400">EXIF Verified · GPS Match</div>
+                      </div>
+                      <span className="text-emerald-600 font-bold">✓ Authentic</span>
+                    </div>
                   </div>
-                  <span className="text-emerald-600 font-bold">✓ Authentic</span>
-                </div>
+                ))}
               </div>
-            </div>
+            )}
           </div>
 
           {/* 3. Complaint Location */}
@@ -565,15 +545,21 @@ export default function AdminComplaintDossierView({
 
             <div className="grid grid-cols-3 gap-2 pt-2 text-center">
               <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="text-base font-extrabold text-slate-900 tabular-nums">8</div>
+                <div className="text-base font-extrabold text-slate-900 tabular-nums">
+                  {item.citizenTotalFiled ?? 1}
+                </div>
                 <div className="text-[10px] text-slate-500">Total Filed</div>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="text-base font-extrabold text-emerald-600 tabular-nums">6</div>
+                <div className="text-base font-extrabold text-emerald-600 tabular-nums">
+                  {item.citizenResolvedCount ?? (item.status === 'Resolved' ? 1 : 0)}
+                </div>
                 <div className="text-[10px] text-slate-500">Resolved</div>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="text-base font-extrabold text-blue-600 tabular-nums">94%</div>
+                <div className="text-base font-extrabold text-blue-600 tabular-nums">
+                  {item.citizenTrustRating || '100%'}
+                </div>
                 <div className="text-[10px] text-slate-500">Trust Rating</div>
               </div>
             </div>
@@ -746,20 +732,26 @@ export default function AdminComplaintDossierView({
             </div>
 
             <div className="space-y-3">
-              {internalNotes.map((n) => (
-                <div
-                  key={n.id}
-                  className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200/70 text-xs space-y-1"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900">
-                      {n.author} ({n.role})
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">{n.time}</span>
-                  </div>
-                  <p className="text-slate-700 text-[11px] leading-relaxed">{n.text}</p>
+              {internalNotes.length === 0 ? (
+                <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-slate-400">
+                  0 internal nodal notes recorded for this dossier yet.
                 </div>
-              ))}
+              ) : (
+                internalNotes.map((n) => (
+                  <div
+                    key={n.id}
+                    className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200/70 text-xs space-y-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900">
+                        {n.author} ({n.role})
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">{n.time}</span>
+                    </div>
+                    <p className="text-slate-700 text-[11px] leading-relaxed">{n.text}</p>
+                  </div>
+                ))
+              )}
             </div>
 
             {showAddNoteInput ? (

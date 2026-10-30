@@ -26,10 +26,10 @@ export default function TicketDetailModal({
   onAddTicketComment,
   onUpvoteTicket
 }) {
-  if (!isOpen || !ticket) return null;
-
   const [feedback, setFeedback] = useState('');
   const [feedbackSent, setFeedbackSent] = useState(false);
+
+  if (!isOpen || !ticket) return null;
 
   const handleSendFeedback = async (e) => {
     e.preventDefault();
