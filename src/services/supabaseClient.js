@@ -98,8 +98,8 @@ export function saveStoredToken(token) {
   }
 }
 
-// Base URL for Backend API (Used when Frontend is on Vercel and Backend is on Render)
-const API_BASE_URL = (
+// Base URL for External Backend API (Used only as fallback when same-origin /api is unavailable)
+const EXTERNAL_API_BASE_URL = (
   import.meta.env.VITE_API_URL ||
   import.meta.env.VITE_BACKEND_URL ||
   ''
@@ -108,6 +108,8 @@ const API_BASE_URL = (
   .replace(/\/$/, '');
 
 // Authenticated Fetch Helper for Express Backend (/api/*)
+// Always tries same-origin /api/* first (works in AI Studio Preview, Localhost, Render & Vercel),
+// and falls back to EXTERNAL_API_BASE_URL only if same-origin /api/* is unreachable or returns HTML/404.
 async function apiFetch(endpoint, options = {}) {
   const token = getStoredToken();
   const headers = {
@@ -117,12 +119,33 @@ async function apiFetch(endpoint, options = {}) {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const fullUrl =
-    endpoint.startsWith('http://') || endpoint.startsWith('https://')
-      ? endpoint
-      : `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-  return fetch(fullUrl, {
+  if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+    return fetch(endpoint, { ...options, headers });
+  }
+
+  const normalizedPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  try {
+    const localRes = await fetch(normalizedPath, {
+      ...options,
+      headers
+    });
+    const contentType = localRes.headers.get('content-type') || '';
+    // If same-origin server handled the API route (JSON response or non-404), return it directly
+    if (localRes.status !== 404 && !contentType.includes('text/html')) {
+      return localRes;
+    }
+    if (!EXTERNAL_API_BASE_URL) {
+      return localRes;
+    }
+  } catch (localErr) {
+    if (!EXTERNAL_API_BASE_URL) {
+      throw localErr;
+    }
+  }
+
+  return fetch(`${EXTERNAL_API_BASE_URL}${normalizedPath}`, {
     ...options,
     headers
   });
@@ -1245,9 +1268,15 @@ export const civicDataService = {
     model = 'gemini-3.8-flash',
     useMapsGrounding = false,
     userLocation = null,
-    currentUser = null
+    currentUser = null,
+    clientComplaints = []
   }) {
     const activeUser = currentUser || getStoredUser();
+    const localComplaints =
+      Array.isArray(clientComplaints) && clientComplaints.length > 0
+        ? clientComplaints
+        : getStoredComplaints();
+
     try {
       const res = await apiFetch('/api/ai/rag-chat', {
         method: 'POST',
@@ -1257,21 +1286,35 @@ export const civicDataService = {
           model,
           useMapsGrounding,
           userLocation,
-          currentUser: activeUser
+          currentUser: activeUser,
+          clientComplaints: localComplaints.slice(0, 50)
         })
       });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        const replyStr = String(data?.reply || '');
+        // Guard against any legacy deployed server returning the old static snapshot template
+        const isStaleLegacySnapshot =
+          replyStr.includes('Live Supabase RAG Snapshot:') &&
+          replyStr.includes('Relevant Records Retrieved from Database:');
+        if (replyStr && !isStaleLegacySnapshot) {
+          return data;
+        }
       }
     } catch (err) {
       console.warn('RAG Chat API fallback:', err);
     }
 
-    // Client-side direct Supabase RAG fallback if backend is unreachable
-    const allComplaints = await this.getComplaints();
+    // Client-side intent-aware Supabase RAG fallback if backend is unreachable
+    const fetchedComplaints = await this.getComplaints();
+    const allComplaints =
+      fetchedComplaints.length > 0 ? fetchedComplaints : localComplaints;
     const resolved = allComplaints.filter((c) => c.status === 'Resolved').length;
-    const inProgress = allComplaints.filter((c) => c.status === 'In Progress').length;
+    const inProgress = allComplaints.filter(
+      (c) => c.status === 'In Progress' || c.status === 'Assigned'
+    ).length;
     const pending = Math.max(0, allComplaints.length - resolved - inProgress);
+    const q = String(message || '').trim().toLowerCase();
 
     const ragSources = allComplaints.slice(0, 4).map((c) => ({
       table: 'complaints',
@@ -1284,19 +1327,107 @@ export const civicDataService = {
       relevance: 'Supabase Live Record'
     }));
 
-    const summaryLines =
-      allComplaints.length > 0
-        ? allComplaints
-            .slice(0, 4)
-            .map(
-              (c) =>
-                `- **#${String(c.id).replace(/^#/, '')}: ${c.title}** (${c.category}) — Status: **${c.status}** | Priority: **${c.priority}** | Location: ${c.location}`
-            )
-            .join('\n')
-        : '- अभी Supabase `complaints` टेबल में कोई शिकायत दर्ज नहीं है। नया मुद्दा रिपोर्ट करने पर यहाँ लाइव डेटा दिखेगा।';
+    const formatRow = (c) =>
+      `- **#${String(c.id).replace(/^#/, '')}: ${c.title}** (${c.category}) — Status: **${c.status}** | Priority: **${c.priority}** | Location: ${c.location || c.ward || 'Indore'}`;
+
+    let replyText = '';
+    if (
+      /^(hi|hello|hey|namaste|namaskar|kaise\s*ho|help)/i.test(q) ||
+      q.includes('kya kar sakte')
+    ) {
+      replyText = `नमस्ते **${activeUser?.name || 'Citizen'}**! 👋 मैं **Civic Connect AI Assistant** हूँ।\n\nअभी लाइव डेटाबेस में **${allComplaints.length}** शिकायतें (Resolved: **${resolved}**, Active: **${inProgress}**, Pending: **${pending}**) हैं। आप मुझसे अपनी शिकायतों का स्टेटस, एरिया की शिकायतें, SLA समय-सीमा, या नज़दीकी नगर निगम कार्यालय के बारे में पूछ सकते हैं!`;
+    } else if (
+      q.includes('map') ||
+      q.includes('near') ||
+      q.includes('aas paas') ||
+      q.includes('aas-paas') ||
+      q.includes('office') ||
+      q.includes('nagar nigam') ||
+      q.includes('kaha hai') ||
+      q.includes('kahan hai')
+    ) {
+      const lat = Number(userLocation?.latitude) || 22.7533;
+      const lng = Number(userLocation?.longitude) || 75.8937;
+      const addr =
+        userLocation?.address ||
+        userLocation?.shortLocation ||
+        activeUser?.city ||
+        'Indore, Madhya Pradesh';
+      replyText = `### 📍 आपकी लाइव लोकेशन एवं नज़दीकी नगर निगम कार्यालय\n- **Detected GPS Location:** ${addr} (\`${lat.toFixed(4)}, ${lng.toFixed(4)}\`)\n- **सिस्टम में कुल शिकायतें:** **${allComplaints.length}** (Resolved: **${resolved}**, Active: **${inProgress}**, Pending: **${pending}**)\n\n### 🏢 नागरिक सहायता एवं संपर्क:\n- **Nagar Nigam / Municipal Control Room:** सोमवार–शनिवार (10:00 AM – 6:00 PM)\n- **Emergency Civic Helpline:** \`181\` / \`1800-233-1044\`\n- नीचे दिए गए **Google Maps Grounding** लिंक पर क्लिक करके अपने लाइव GPS से सीधा रास्ता (Directions) देखें।`;
+    } else if (
+      q.includes('sla') ||
+      q.includes('kitne ghante') ||
+      q.includes('kitna time') ||
+      q.includes('kab tak')
+    ) {
+      replyText = `### ⏱️ Civic Connect SLA समय-सीमा\n- 🚨 **Critical / Emergency:** 4 – 12 घंटे\n- 🔴 **High Priority:** 24 घंटे\n- 🟠 **Medium Priority:** 48 घंटे\n- 🟢 **Low Priority:** 72 घंटे\n\nनिर्धारित समय में निवारण न होने पर शिकायत स्वतः **Zonal Commissioner Escalation** में चली जाती है।`;
+    } else if (
+      (q.includes('kaise') || q.includes('how')) &&
+      (q.includes('report') ||
+        q.includes('complaint') ||
+        q.includes('shikayat') ||
+        q.includes('issue'))
+    ) {
+      replyText = `### 📝 नई शिकायत कैसे दर्ज करें?\n1. डैशबोर्ड पर **Report Issue** बटन दबाएँ।\n2. आपकी **Live GPS Location और Ward** अपने-आप डिटेक्ट हो जाएगी।\n3. समस्या की **Category**, विवरण और फोटो जोड़कर सबमिट करें—तुरंत **Ticket ID** जनरेट हो जाएगी।`;
+    } else if (q.includes('officer') || q.includes('verify') || q.includes('approval')) {
+      replyText = `### 🏛️ Municipal Officer Two-Tier Verification\nम्युनिसिपल ऑफिसर को लॉगिन करने के लिए:\n- **Step 1:** अपना रजिस्टर्ड ईमेल वेरीफाई करना होता है।\n- **Step 2:** **Super Admin** द्वारा *Municipality Management* से अकाउंट **Approve** किया जाना अनिवार्य है।`;
+    } else if (
+      q.includes('area') ||
+      q.includes('ward') ||
+      q.includes('zone') ||
+      q.includes('kitne') ||
+      q.includes('kitni') ||
+      q.includes('total') ||
+      q.includes('submit')
+    ) {
+      const detectedCity =
+        userLocation?.shortLocation ||
+        userLocation?.city ||
+        activeUser?.city ||
+        'आपके क्षेत्र';
+      const rows =
+        allComplaints.length > 0
+          ? allComplaints.slice(0, 5).map(formatRow).join('\n')
+          : '- अभी डेटाबेस में 0 शिकायतें दर्ज हैं।';
+      replyText = `### 📊 आपके क्षेत्र (${detectedCity}) एवं लाइव डेटाबेस में दर्ज शिकायतें\n- **कुल सबमिट की गई शिकायतें:** **${allComplaints.length}**\n  - ✅ **Resolved:** **${resolved}**\n  - 🔄 **In Progress / Active:** **${inProgress}**\n  - ⏳ **Pending:** **${pending}**\n\n### 📌 दर्ज शिकायतों की सूची:\n${rows}`;
+    } else if (
+      q.includes('mera') ||
+      q.includes('meri') ||
+      q.includes('mere') ||
+      q.includes('my ') ||
+      q.includes('apna')
+    ) {
+      const myEmail = (activeUser?.email || '').toLowerCase();
+      const myList = myEmail
+        ? allComplaints.filter((c) => (c.citizenEmail || '').toLowerCase() === myEmail)
+        : allComplaints;
+      const listToShow = myList.length > 0 ? myList : allComplaints;
+      replyText =
+        listToShow.length > 0
+          ? `### 📋 आपकी शिकायतों का लाइव स्टेटस (${listToShow.length} Record${listToShow.length > 1 ? 's' : ''}):\n${listToShow.slice(0, 5).map(formatRow).join('\n')}`
+          : `आपके अकाउंट (**${activeUser?.email || 'Guest'}**) से अभी **0 शिकायतें** दर्ज हैं। आप **Report Issue** पर क्लिक करके नई शिकायत दर्ज कर सकते हैं।`;
+    } else {
+      const summaryLines =
+        allComplaints.length > 0
+          ? allComplaints.slice(0, 4).map(formatRow).join('\n')
+          : '- अभी Supabase `complaints` टेबल में 0 शिकायतें दर्ज हैं। नया मुद्दा रिपोर्ट करने पर यहाँ लाइव डेटा दिखेगा।';
+      replyText = `### 🤖 आपके प्रश्न ("${message}") का उत्तर\n- **कुल लाइव शिकायतें:** **${allComplaints.length}** (Resolved: **${resolved}**, In Progress: **${inProgress}**, Pending: **${pending}**)\n\n${summaryLines}`;
+    }
+
+    const isMapIntent =
+      Boolean(useMapsGrounding) ||
+      q.includes('map') ||
+      q.includes('near') ||
+      q.includes('aas paas') ||
+      q.includes('aas-paas') ||
+      q.includes('office') ||
+      q.includes('kaha');
+
+    const lat = Number(userLocation?.latitude) || 22.7533;
+    const lng = Number(userLocation?.longitude) || 75.8937;
 
     return {
-      reply: `📊 **Live Supabase RAG Data:** कुल **${allComplaints.length}** शिकायतें (Resolved: **${resolved}**, In Progress: **${inProgress}**, Pending: **${pending}**)\n\n${summaryLines}`,
+      reply: replyText,
       model: `${model} (Direct Supabase RAG)`,
       supabaseConnected: Boolean(activeCredentials.isRealCloud),
       ragStats: {
@@ -1306,11 +1437,13 @@ export const civicDataService = {
         pendingCount: pending
       },
       ragSources,
-      mapsLinks: userLocation?.latitude
+      mapsLinks: isMapIntent
         ? [
             {
-              uri: `https://www.google.com/maps/search/?api=1&query=${userLocation.latitude},${userLocation.longitude}`,
-              title: `${userLocation.shortLocation || 'Your Live Location'} on Google Maps`
+              uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                `Municipal Corporation Office near ${lat},${lng}`
+              )}`,
+              title: `Nearby Municipal Office (${userLocation?.shortLocation || 'Live GPS'}) on Google Maps`
             }
           ]
         : []

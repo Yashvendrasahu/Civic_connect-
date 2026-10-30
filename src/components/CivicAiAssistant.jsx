@@ -134,7 +134,8 @@ export default function CivicAiAssistant({
         model: selectedModel,
         useMapsGrounding,
         userLocation,
-        currentUser
+        currentUser,
+        clientComplaints: complaints
       });
 
       const assistantMsg = {

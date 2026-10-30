@@ -3129,73 +3129,357 @@ function retrieveRelevantRagContext(query, dataset, currentUser) {
       workordersCount: dataset.workorders.length
     },
     topComplaints,
-    userComplaints: userComplaints.slice(0, 5),
+    allComplaints: dataset.complaints,
+    userComplaints: userComplaints.slice(0, 10),
     topMunicipalities,
-    officers: officers.slice(0, 6),
+    officers: officers.slice(0, 10),
     pendingOfficers,
-    fieldCrews: dataset.fieldCrews.slice(0, 5),
-    workorders: dataset.workorders.slice(0, 5),
-    recentTimeline: dataset.timeline.slice(0, 6),
+    fieldCrews: dataset.fieldCrews.slice(0, 10),
+    workorders: dataset.workorders.slice(0, 10),
+    recentTimeline: dataset.timeline.slice(0, 10),
     ragSources
   };
 }
 
-// Deterministic RAG Answer Synthesizer (Used if GEMINI_API_KEY is not set locally)
-function buildDeterministicRagReply(query, ragContext, currentUser, supabaseConnected) {
-  const q = (query || '').toLowerCase();
-  const { stats, topComplaints, userComplaints, pendingOfficers, fieldCrews } = ragContext;
+// Normalize multi-turn chat history so Gemini API never fails with 400 INVALID_ARGUMENT
+// (Must start with 'user' and strictly alternate 'user' <-> 'model')
+function normalizeGeminiContents(history, currentMessage) {
+  const rawTurns = [];
+  if (Array.isArray(history)) {
+    for (const turn of history.slice(-10)) {
+      if (!turn || !turn.content || !String(turn.content).trim()) continue;
+      const role = turn.role === 'assistant' || turn.role === 'model' ? 'model' : 'user';
+      rawTurns.push({ role, text: String(turn.content).trim() });
+    }
+  }
+  rawTurns.push({ role: 'user', text: String(currentMessage).trim() });
 
-  const headerLine = supabaseConnected
-    ? `📊 **Live Supabase RAG Snapshot:** कुल **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, In Progress: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**)`
-    : `📊 **Civic Connect RAG Snapshot:** कुल **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, In Progress: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**)`;
+  // Strip any leading 'model' messages (e.g., welcome greeting or reset banner)
+  while (rawTurns.length > 0 && rawTurns[0].role !== 'user') {
+    rawTurns.shift();
+  }
 
-  if (q.includes('officer') || q.includes('verify') || q.includes('approval') || q.includes('municipal login')) {
+  // Merge consecutive turns of the same role so roles strictly alternate
+  const merged = [];
+  for (const turn of rawTurns) {
+    if (merged.length > 0 && merged[merged.length - 1].role === turn.role) {
+      merged[merged.length - 1].parts[0].text += `\n\n${turn.text}`;
+    } else {
+      merged.push({
+        role: turn.role,
+        parts: [{ text: turn.text }]
+      });
+    }
+  }
+
+  return merged;
+}
+
+// Intent-Aware RAG Answer Synthesizer (Provides distinct, question-specific answers when offline or without GEMINI_API_KEY)
+function buildDeterministicRagReply(query, ragContext, currentUser, supabaseConnected, userLocation = null) {
+  const rawQuery = String(query || '').trim();
+  const q = rawQuery.toLowerCase();
+  const {
+    stats,
+    topComplaints = [],
+    allComplaints = [],
+    userComplaints = [],
+    officers = [],
+    pendingOfficers = [],
+    fieldCrews = [],
+    workorders = []
+  } = ragContext;
+
+  const formatTicketBullet = (c) =>
+    `- **#${String(c.id).replace(/^#/, '')}: ${c.title}**\n  - **Category:** ${c.category || 'General'} | **Status:** **${c.status}** | **Priority:** **${c.priority}**\n  - **Location:** ${c.location || c.ward || 'Indore'} | **Squad:** ${c.assignedTeam || c.department || 'Municipal Squad'}`;
+
+  // 1. Check if user is asking about a specific Ticket ID (e.g., #CC10246, CC-101, CMP-10245)
+  const idMatch = rawQuery.match(/#?([a-zA-Z]{2,4}[-_]?\d{3,8}|\d{4,8})/);
+  if (idMatch) {
+    const targetId = idMatch[1].toLowerCase().replace(/^#/, '');
+    const exactTicket = allComplaints.find(
+      (c) => String(c.id || '').toLowerCase().replace(/^#/, '') === targetId
+    );
+    if (exactTicket) {
+      return `### 🎫 Ticket Dossier: #${String(exactTicket.id).replace(/^#/, '')}\nयहाँ आपके द्वारा पूछे गए टिकट का लाइव डेटाबेस विवरण है:\n\n- **Title:** ${exactTicket.title}\n- **Status:** **${exactTicket.status}** (${exactTicket.slaStatus || 'SLA Active'})\n- **Priority:** **${exactTicket.priority}**\n- **Category & Dept:** ${exactTicket.category} • ${exactTicket.department || 'Municipal Operations'}\n- **Assigned Squad:** ${exactTicket.assignedTeam || 'Rapid Response Squad'}\n- **Location / Ward:** ${exactTicket.location || exactTicket.ward || 'Indore'}\n- **Reported By:** ${exactTicket.citizenName || 'Citizen'} (${exactTicket.date || 'Recent'})\n- **Description:** ${exactTicket.description || 'No additional description provided.'}`;
+    }
+    const availableIds = allComplaints
+      .slice(0, 5)
+      .map((c) => `\`#${String(c.id).replace(/^#/, '')}\``)
+      .join(', ');
+    return `### 🔍 Ticket #${idMatch[1].toUpperCase()} Not Found\nडेटाबेस में टिकट **#${idMatch[1].toUpperCase()}** नाम से कोई शिकायत नहीं मिली।\n\n${
+      availableIds
+        ? `**उपलब्ध लाइव टिकट IDs:** ${availableIds}`
+        : 'अभी डेटाबेस में कुल **0** शिकायतें दर्ज हैं। आप **Report Issue** से नई शिकायत दर्ज कर सकते हैं।'
+    }`;
+  }
+
+  // 2. Greetings / Help / Capabilities ("hi", "hello", "namaste", "kya kar sakte ho", "help")
+  if (
+    /^(hi|hello|hey|namaste|namaskar|hola|good\s*(morning|afternoon|evening)|kaise\s*ho|kya\s*haal)/i.test(rawQuery) ||
+    q.includes('who are you') ||
+    q.includes('kya kar sakte') ||
+    q.includes('what can you do') ||
+    q === 'help' ||
+    q.includes('madad')
+  ) {
+    return `नमस्ते **${currentUser?.name || 'Citizen'}**! 👋 मैं **Civic Connect AI Assistant** हूँ।\n\nमैं आपके लाइव **Supabase Database** और **Google Maps GPS** से जुड़ा हूँ। अभी सिस्टम में **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, Active: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**) दर्ज हैं।\n\n### 💡 आप मुझसे क्या-क्या पूछ सकते हैं?\n- **अपनी शिकायतों का स्टेटस:** *"Mere complaints ka live status kya hai?"*\n- **किसी खास कैटेगरी की जाँच:** *"Sadak/Pothole, Water leakage, ya Garbage ki kitni complaints hain?"*\n- **SLA और नियम:** *"Report issue karne par SLA kitne ghante ka hota hai?"*\n- **अर्जेंट मुद्दे:** *"High priority pending complaints ki list dikhao"*\n- **लोकेशन व मैप्स:** *"Mere aas-paas nearest Municipal Office kaha hai?"*`;
+  }
+
+  // 3. SLA / Resolution Time / Escalation Rules
+  if (
+    q.includes('sla') ||
+    q.includes('kitne ghante') ||
+    q.includes('kitna time') ||
+    q.includes('kitna samay') ||
+    q.includes('kab tak') ||
+    q.includes('deadline') ||
+    q.includes('resolution time') ||
+    q.includes('time lagta')
+  ) {
+    return `### ⏱️ Civic Connect SLA (Service Level Agreement) निवारण समय-सीमा\nजब आप कोई समस्या रिपोर्ट करते हैं, तो उसकी गंभीरता (Priority) और विभाग के अनुसार **SLA Timer** तुरंत शुरू हो जाता है:\n\n- 🚨 **Critical / Emergency (4 – 12 घंटे):** मुख्य पानी की पाइपलाइन फटना, खुला बिजली का तार, सीवर ओवरफ्लो।\n- 🔴 **High Priority (24 घंटे):** मुख्य सड़क पर गहरा गड्ढा (Pothole), ट्रांसफार्मर खराबी, कचरा डंप ओवरफ्लो।\n- 🟠 **Medium Priority (48 घंटे):** स्ट्रीटलाइट बंद होना, नाली जाम होना (Drainage Blockage)।\n- 🟢 **Low Priority (72 घंटे):** पार्क रखरखाव, सामान्य सफाई या साइनबोर्ड मरम्मत।\n\n> **Auto-Escalation नियम:** यदि निर्धारित SLA समय के भीतर शिकायत **Resolved** नहीं होती है, तो सिस्टम उसे स्वचालित रूप से **Zonal Commissioner & Super Admin Escalation Matrix** में भेज देता है। (वर्तमान में **${stats.pendingCount}** Pending और **${stats.inProgressCount}** In Progress शिकायतें ट्रैक हो रही हैं)।`;
+  }
+
+  // 4. How to Report / File a Complaint ("complaint kaise kare", "how to report", "shikayat darj")
+  if (
+    (q.includes('kaise') || q.includes('how to') || q.includes('step') || q.includes('process') || q.includes('tarika')) &&
+    (q.includes('report') || q.includes('complaint') || q.includes('shikayat') || q.includes('issue') || q.includes('darj') || q.includes('file'))
+  ) {
+    return `### 📝 नई शिकायत (Report Issue) दर्ज करने की प्रक्रिया\nआप Civic Connect पर 30 सेकंड में अपनी शिकायत दर्ज कर सकते हैं:\n\n1. **Report Issue खोलें:** डैशबोर्ड पर **"+ Report Issue"** बटन पर क्लिक करें।\n2. **Auto-GPS Location:** सिस्टम आपके डिवाइस के GPS से **Live Coordinates, Street Address और Ward** अपने-आप भर लेगा (आप चाहें तो *"Auto-Detect GPS"* बटन भी दबा सकते हैं)।\n3. **Category & विवरण चुनें:** समस्या की श्रेणी (जैसे *Road & Potholes, Water Supply, Garbage & Sanitation, Streetlight*) चुनें और छोटा विवरण लिखें।\n4. **फोटो अपलोड करें:** मौके की फोटो अटैच करें ताकि AI Triage उसकी गंभीरता (Priority) तुरंत पहचान सके।\n5. **तुरंत Ticket ID प्राप्त करें:** सबमिट करते ही आपको एक यूनिक टिकट ID मिलेगी जिससे आप लाइव ट्रैकिंग और रिजॉल्यूशन सर्टिफिकेट पा सकते हैं।`;
+  }
+
+  // 5. Municipal Officer Verification & Admin Approval
+  if (
+    q.includes('officer') ||
+    q.includes('verify') ||
+    q.includes('verification') ||
+    q.includes('approval') ||
+    q.includes('municipal login')
+  ) {
     const pendingList =
       pendingOfficers.length > 0
         ? pendingOfficers
             .map(
               (o) =>
-                `- **${o.name}** (${o.email}) — City: ${o.city || 'Indore'} | Email Verified: ${
+                `- **${o.name}** (${o.email}) — City: ${o.city || 'Indore'} | Dept: ${o.department || 'General'} | Email Verified: **${
                   o.isVerified ? 'Yes' : 'No'
-                } | Admin Status: **${o.verificationStatus || 'Pending'}**`
+                }** | Admin Status: **${o.verificationStatus || 'Pending'}**`
             )
             .join('\n')
-        : '- अभी कोई भी Municipal Officer पेंडिंग वेरिफिकेशन में नहीं है।';
+        : '- अभी कोई भी Municipal Officer पेंडिंग एडमिन वेरिफिकेशन में नहीं है।';
 
-    return `${headerLine}\n\n### 🏛️ Municipal Officer Two-Tier Verification Status\nडेटाबेस में कुल **${stats.totalOfficers}** म्युनिसिपल ऑफिसर हैं, जिनमें से **${stats.pendingOfficersCount}** सुपर एडमिन अप्रूवल की प्रतीक्षा कर रहे हैं:\n\n${pendingList}\n\n> **नियम:** म्युनिसिपल ऑफिसर को पहले ईमेल वेरीफाई करना होता है (Step 1) और फिर Super Admin द्वारा **Municipality Management** से Approve किए जाने के बाद ही लॉगिन की अनुमति मिलती है (Step 2)।`;
-  }
-
-  if (q.includes('mera') || q.includes('meri') || q.includes('my ') || q.includes('status')) {
-    const listToUse = userComplaints.length > 0 ? userComplaints : topComplaints.slice(0, 4);
-    if (listToUse.length === 0) {
-      return `${headerLine}\n\nअभी आपके अकाउंट (${currentUser?.email || 'Guest'}) से कोई शिकायत दर्ज नहीं मिली है। आप **Report Issue** पर क्लिक करके नई शिकायत दर्ज कर सकते हैं—आपकी लाइव GPS लोकेशन अपने-आप डिटेक्ट हो जाएगी!`;
-    }
-    const rows = listToUse
-      .map(
-        (c) =>
-          `- **#${String(c.id).replace(/^#/, '')}: ${c.title}**\n  - **Status:** ${c.status} | **Priority:** ${c.priority}\n  - **Location:** ${c.location || c.ward}\n  - **Assigned Squad:** ${c.assignedTeam || c.department}`
-      )
+    const verifiedList = officers
+      .filter((o) => o.adminVerified)
+      .slice(0, 4)
+      .map((o) => `- **${o.name}** (${o.city || 'Indore'} • ${o.department || 'Municipal Squad'}) — ✅ **Verified**`)
       .join('\n');
-    return `${headerLine}\n\n### 📋 आपके द्वारा पूछी गई शिकायतों की लाइव स्थिति (Retrieved from Supabase):\n${rows}`;
+
+    return `### 🏛️ Municipal Officer Two-Tier Verification & Live Status\nSupabase डेटाबेस में कुल **${stats.totalOfficers}** म्युनिसिपल ऑफिसर पंजीकृत हैं, जिनमें से **${stats.pendingOfficersCount}** अप्रूवल की प्रतीक्षा कर रहे हैं:\n\n**Pending Admin Verification (${stats.pendingOfficersCount}):**\n${pendingList}\n\n${
+      verifiedList ? `**Active Verified Officers:**\n${verifiedList}\n\n` : ''
+    }### 🔐 Two-Tier Security नियम:\n- **Step 1 (Email OTP/Link):** ऑफिसर को रजिस्ट्रेशन के बाद अपना ईमेल वेरीफाई करना अनिवार्य है।\n- **Step 2 (Super Admin Approval):** सुरक्षा कारणों से जब तक **Super Admin** अपने कंसोल (*Municipality Management*) से ऑफिसर को **Approve** नहीं करता, तब तक ऑफिसर पोर्टल में लॉगिन नहीं कर सकता।`;
   }
 
-  const sampleRows =
-    topComplaints.length > 0
-      ? topComplaints
-          .slice(0, 4)
-          .map(
-            (c) =>
-              `- **#${String(c.id).replace(/^#/, '')}** — *${c.title}* (${c.category}) | **${c.status}** | 📍 ${c.location} | 👷 ${c.assignedTeam || c.department}`
-          )
-          .join('\n')
-      : '- अभी डेटाबेस में कोई शिकायत मौजूद नहीं है। जब यूज़र नई शिकायत दर्ज करेंगे तो वह यहाँ तुरंत दिखाई देगी।';
+  // 6. Active Field Squads / Workorders / Crew Status
+  if (
+    q.includes('squad') ||
+    q.includes('crew') ||
+    q.includes('workorder') ||
+    q.includes('work order') ||
+    q.includes('field team') ||
+    (q.includes('team') && !q.includes('my'))
+  ) {
+    const crewRows =
+      fieldCrews.length > 0
+        ? fieldCrews
+            .map(
+              (cr) =>
+                `- **${cr.name}** (${cr.department || 'Field Ops'}) — Status: **${cr.status || 'Active'}** | Zone: ${cr.zone || cr.ward || 'Municipal Zone'}`
+            )
+            .join('\n')
+        : '- अभी कोई फील्ड स्क्वाड डेटाबेस में असाइन नहीं है।';
 
-  const crewRows = (fieldCrews || [])
-    .slice(0, 3)
-    .map((cr) => `- **${cr.name}** (${cr.department}) — Status: **${cr.status}**`)
-    .join('\n');
+    const woRows =
+      workorders.length > 0
+        ? workorders
+            .slice(0, 5)
+            .map(
+              (w) =>
+                `- **Workorder ${w.id || ''}**: Ticket \`#${String(w.complaint_id || w.complaintId || '').replace(/^#/, '')}\` — Squad: **${w.assigned_squad || w.assignedSquad || 'Field Team'}** (${w.status || 'Dispatched'})`
+            )
+            .join('\n')
+        : '- अभी कोई सक्रिय वर्कऑर्डर (Workorder) पेंडिंग नहीं है।';
 
-  return `${headerLine}\n\n### 🔍 Relevant Records Retrieved from Database:\n${sampleRows}\n\n### 🚛 Active Municipal Field Squads:\n${crewRows || '- All rapid response squads on standby.'}\n\nआप किसी भी **Ticket ID** (जैसे \`#CC10246\`), **Ward**, **Department**, या अपने आस-पास के **Google Maps** स्थानों के बारे में पूछ सकते हैं!`;
+    return `### 🚛 Active Municipal Field Squads & Workorders\nडेटाबेस में वर्तमान में **${stats.activeCrewsCount}** फील्ड स्क्वाड्स और **${stats.workordersCount}** वर्कऑर्डर दर्ज हैं:\n\n**Field Squads:**\n${crewRows}\n\n**Recent Dispatched Workorders:**\n${woRows}`;
+  }
+
+  // 7. Location / Nearest Municipal Office / Google Maps Query
+  if (
+    q.includes('map') ||
+    q.includes('near') ||
+    q.includes('aas paas') ||
+    q.includes('aas-paas') ||
+    q.includes('paas') ||
+    q.includes('kaha') ||
+    q.includes('where') ||
+    q.includes('office') ||
+    q.includes('hospital') ||
+    q.includes('nagar nigam') ||
+    q.includes('direction')
+  ) {
+    const lat = Number(userLocation?.latitude) || 22.7533;
+    const lng = Number(userLocation?.longitude) || 75.8937;
+    const detectedAddr =
+      userLocation?.address || userLocation?.shortLocation || currentUser?.city || 'Indore, Madhya Pradesh';
+
+    const cityToken = String(detectedAddr).split(',')[0].trim().toLowerCase();
+    const localComplaints = allComplaints.filter((c) =>
+      `${c.location} ${c.ward}`.toLowerCase().includes(cityToken)
+    );
+
+    return `### 📍 आपकी लाइव लोकेशन एवं नज़दीकी नगर निगम कार्यालय\n- **Detected GPS Coordinates:** \`${lat.toFixed(5)}, ${lng.toFixed(5)}\`\n- **Current Area / Address:** ${detectedAddr}\n- **आपके क्षेत्र में दर्ज शिकायतें:** **${localComplaints.length}** (कुल सिस्टम शिकायतें: **${stats.totalComplaints}**)\n\n### 🏢 प्रमुख नागरिक सहायता केंद्र:\n- **Nagar Nigam / Municipal Corporation Control Room:** सोमवार–शनिवार (10:00 AM – 6:00 PM)\n- **Emergency Civic & CM Helpline:** \`181\` / टोल-फ्री \`1800-233-1044\`\n- **Google Maps लिंक:** नीचे दिए गए **Google Maps Grounding** कार्ड पर क्लिक करके अपने वर्तमान GPS (\`${lat.toFixed(4)}, ${lng.toFixed(4)}\`) से सीधा रास्ता (Directions) देखें।`;
+  }
+
+  // 8. Category-Specific Queries (Roads/Potholes, Water/Sewage, Garbage/Sanitation, Streetlights/Electricity)
+  const categoryMatchers = [
+    {
+      name: 'Roads & Infrastructure (सड़क एवं गड्ढे)',
+      dept: 'PWD & Road Maintenance Wing',
+      keywords: ['sadak', 'gaddha', 'pothole', 'road', 'bridge', 'footpath', 'traffic', 'asphalt'],
+      filter: (c) => /road|pothole|infra|street|highway|bridge/i.test(`${c.category} ${c.title} ${c.description}`)
+    },
+    {
+      name: 'Water Supply & Drainage (पेयजल एवं सीवेज/नाली)',
+      dept: 'Jal Kal & Drainage Engineering Dept',
+      keywords: ['paani', 'pani', 'water', 'leak', 'pipeline', 'sewage', 'drain', 'naali', 'nali', 'flood'],
+      filter: (c) => /water|sewage|drain|pipe|leak|flood/i.test(`${c.category} ${c.title} ${c.description}`)
+    },
+    {
+      name: 'Sanitation & Solid Waste (सफाई एवं कचरा प्रबंधन)',
+      dept: 'Swachhata & Solid Waste Management Squad',
+      keywords: ['kachra', 'safai', 'garbage', 'waste', 'dustbin', 'trash', 'dump', 'sanitation', 'smell'],
+      filter: (c) => /garbage|waste|sanitation|clean|trash|dump/i.test(`${c.category} ${c.title} ${c.description}`)
+    },
+    {
+      name: 'Streetlights & Electricity (स्ट्रीटलाइट एवं बिजली)',
+      dept: 'Municipal Electrical & Streetlight Wing',
+      keywords: ['light', 'bijli', 'streetlight', 'pole', 'electric', 'wire', 'dark', 'transformer'],
+      filter: (c) => /light|electric|power|pole|wire/i.test(`${c.category} ${c.title} ${c.description}`)
+    }
+  ];
+
+  for (const cat of categoryMatchers) {
+    if (cat.keywords.some((kw) => q.includes(kw))) {
+      const matched = allComplaints.filter(cat.filter);
+      const rows =
+        matched.length > 0
+          ? matched.slice(0, 5).map(formatTicketBullet).join('\n')
+          : `- अभी डेटाबेस में **${cat.name}** श्रेणी की कोई शिकायत दर्ज नहीं है।`;
+
+      return `### 🛠️ ${cat.name} — लाइव डेटाबेस रिपोर्ट\n- **कुल संबंधित शिकायतें:** **${matched.length}** (कुल डेटाबेस शिकायतें: ${stats.totalComplaints})\n- **नोडल विभाग:** ${cat.dept}\n\n${rows}\n\nयदि आप इस श्रेणी की नई समस्या देख रहे हैं, तो **Report Issue** बटन से फोटो और लाइव GPS के साथ तुरंत शिकायत दर्ज करें।`;
+    }
+  }
+
+  // 9. Priority / Status Filtered Queries (High Priority, Critical, Pending, Resolved, In Progress)
+  if (q.includes('high priority') || q.includes('critical') || q.includes('urgent') || q.includes('gambhir')) {
+    const urgentList = allComplaints.filter(
+      (c) =>
+        (c.priority === 'High' || c.priority === 'Critical') &&
+        (q.includes('pending') ? c.status !== 'Resolved' : true)
+    );
+    const rows =
+      urgentList.length > 0
+        ? urgentList.slice(0, 6).map(formatTicketBullet).join('\n')
+        : '- अभी डेटाबेस में कोई भी **High / Critical Priority** शिकायत पेंडिंग नहीं है (0 Records)।';
+
+    return `### 🚨 High / Critical Priority Complaints (${urgentList.length} Found)\nयहाँ Supabase डेटाबेस से उच्च प्राथमिकता (High/Critical Priority) वाली शिकायतों की लाइव सूची है:\n\n${rows}`;
+  }
+
+  if (q.includes('resolved') || q.includes('complete') || q.includes('hal ') || q.includes('sahi ho')) {
+    const resolvedList = allComplaints.filter((c) => c.status === 'Resolved');
+    const rows =
+      resolvedList.length > 0
+        ? resolvedList.slice(0, 5).map(formatTicketBullet).join('\n')
+        : '- अभी तक कोई शिकायत **Resolved** स्थिति में नहीं है (0 Resolved)।';
+
+    return `### ✅ Resolved Complaints Status (${stats.resolvedCount} of ${stats.totalComplaints})\nडेटाबेस में कुल **${stats.totalComplaints}** में से **${stats.resolvedCount}** शिकायतों का निवारण (Resolved) किया जा चुका है (Pending: **${stats.pendingCount}**, In Progress: **${stats.inProgressCount}**):\n\n${rows}`;
+  }
+
+  if (q.includes('pending') && !q.includes('officer')) {
+    const pendingList = allComplaints.filter(
+      (c) => c.status === 'Pending' || c.status === 'Submitted' || c.status === 'Open'
+    );
+    const rows =
+      pendingList.length > 0
+        ? pendingList.slice(0, 5).map(formatTicketBullet).join('\n')
+        : '- अभी कोई भी शिकायत **Pending** नहीं है (0 Pending)।';
+
+    return `### ⏳ Pending Complaints in Supabase (${pendingList.length} Found)\nडेटाबेस में अभी **${pendingList.length}** शिकायतें प्रारंभिक कार्रवाई (Pending) में हैं:\n\n${rows}`;
+  }
+
+  // 10. Area / Ward / Total Counts / Supabase Database Summary Queries ("area", "ward", "kitne", "kitni", "total", "submit", "supabase")
+  if (
+    q.includes('area') ||
+    q.includes('ward') ||
+    q.includes('zone') ||
+    q.includes('shahar') ||
+    q.includes('city') ||
+    q.includes('kitne') ||
+    q.includes('kitni') ||
+    q.includes('total') ||
+    q.includes('count') ||
+    q.includes('submit') ||
+    q.includes('registered') ||
+    q.includes('supabase') ||
+    q.includes('database') ||
+    q.includes('stats') ||
+    q.includes('summary')
+  ) {
+    const detectedArea =
+      userLocation?.shortLocation ||
+      userLocation?.address ||
+      currentUser?.city ||
+      'आपके क्षेत्र';
+    const areaToken = String(detectedArea).split(',')[0].trim().toLowerCase();
+    const areaMatched = areaToken
+      ? allComplaints.filter((c) =>
+          `${c.location} ${c.ward}`.toLowerCase().includes(areaToken)
+        )
+      : [];
+
+    const recentRows =
+      allComplaints.length > 0
+        ? allComplaints.slice(0, 5).map(formatTicketBullet).join('\n')
+        : '- डेटाबेस में अभी 0 शिकायतें हैं।';
+
+    return `### 📊 आपके क्षेत्र (${detectedArea}) एवं Live Supabase Database रिपोर्ट\nयहाँ आपके प्रश्न (**"${rawQuery}"**) के अनुसार लाइव डेटाबेस का विवरण है:\n\n- **कुल सबमिट की गई शिकायतें (Total Complaints):** **${stats.totalComplaints}**\n  - ✅ **Resolved:** **${stats.resolvedCount}**\n  - 🔄 **In Progress / Assigned:** **${stats.inProgressCount}**\n  - ⏳ **Pending:** **${stats.pendingCount}**\n- **लोकेशन मैच (${detectedArea}):** **${areaMatched.length}** स्थानीय रिकॉर्ड (कुल प्लेटफ़ॉर्म रिकॉर्ड्स: **${stats.totalComplaints}**)\n- **म्युनिसिपल ऑफिसर्स:** **${stats.totalOfficers}** (Pending Admin Approval: **${stats.pendingOfficersCount}**) | **फील्ड स्क्वाड्स:** **${stats.activeCrewsCount}**\n\n### 📌 दर्ज शिकायतों की सूची (Live Records):\n${recentRows}`;
+  }
+
+  // 11. Current User's Personal Complaints ("mera", "meri", "mere", "my ", "apna")
+  if (
+    q.includes('mera') ||
+    q.includes('meri') ||
+    q.includes('mere') ||
+    q.includes('my ') ||
+    q.includes('apna') ||
+    q.includes('apni') ||
+    q.includes('status')
+  ) {
+    const listToDisplay = userComplaints.length > 0 ? userComplaints : allComplaints;
+    if (listToDisplay.length === 0) {
+      return `### 👤 आपकी शिकायतों का लाइव स्टेटस (${currentUser?.name || 'Citizen'})\nअभी Supabase डेटाबेस में **0 शिकायतें** दर्ज हैं।\n\n- नई शिकायत दर्ज करने के लिए डैशबोर्ड पर **Report Issue** पर क्लिक करें—आपकी लाइव GPS लोकेशन अपने-आप जुड़ जाएगी!`;
+    }
+    const rows = listToDisplay.slice(0, 5).map(formatTicketBullet).join('\n');
+    return `### 📋 आपकी शिकायतों का लाइव स्टेटस (${listToDisplay.length} Active Record${listToDisplay.length > 1 ? 's' : ''}):\n- **Resolved:** **${stats.resolvedCount}** | **In Progress:** **${stats.inProgressCount}** | **Pending:** **${stats.pendingCount}**\n\n${rows}`;
+  }
+
+  // 12. Keyword-Matched Records or Direct Conversational Response for Any Other Query
+  const matchedRecords = topComplaints.filter((c) => (c._ragScore || 0) > 0);
+  if (matchedRecords.length > 0) {
+    const rows = matchedRecords.slice(0, 4).map(formatTicketBullet).join('\n');
+    return `### 🔍 आपके प्रश्न ("${rawQuery}") से संबंधित लाइव रिकॉर्ड्स (${matchedRecords.length} Found)\nSupabase डेटाबेस में आपके कीवर्ड से मेल खाती हुई निम्नलिखित शिकायतें मिली हैं:\n\n${rows}\n\nयदि आप किसी विशेष टिकट का पूरा विवरण चाहते हैं, तो उसका **Ticket ID** लिखें।`;
+  }
+
+  return `### 🤖 आपके प्रश्न का उत्तर: *"${rawQuery}"*\nमैंने आपके इस प्रश्न के लिए लाइव **Supabase Database** (कुल **${stats.totalComplaints}** शिकायतें, **${stats.totalOfficers}** ऑफिसर्स) की जाँच की:\n\n- **मैचिंग शिकायतें:** आपके द्वारा पूछे गए विषय (*"${rawQuery}"*) से मेल खाती कोई सीधी शिकायत अभी डेटाबेस में दर्ज नहीं है।\n- **लाइव सिस्टम स्थिति:** कुल **${stats.totalComplaints}** शिकायतें (Resolved: **${stats.resolvedCount}**, Active: **${stats.inProgressCount}**, Pending: **${stats.pendingCount}**)।\n\n**सुझाव:** आप मुझसे किसी विशेष **Category** (*Road, Water, Garbage, Streetlight*), **SLA नियम**, **Officer Verification**, **Nearest Municipal Office**, या **Ticket ID** के बारे में पूछ सकते हैं!`;
 }
 
 // 14b. Multi-Turn Supabase RAG + Gemini Maps Grounding Chat Endpoint
@@ -3206,7 +3490,8 @@ app.post('/api/ai/rag-chat', optionalAuth, async (req, res) => {
     model: requestedModel = 'gemini-3.8-flash',
     useMapsGrounding = false,
     userLocation = null,
-    currentUser: bodyUser = null
+    currentUser: bodyUser = null,
+    clientComplaints = []
   } = req.body || {};
 
   if (!message || !String(message).trim()) {
@@ -3221,49 +3506,59 @@ app.post('/api/ai/rag-chat', optionalAuth, async (req, res) => {
     ward: 'Ward 18'
   };
 
-  // 1. Retrieve Live Data from Supabase + Local Store
+  // 1. Retrieve Live Data from Supabase + Local Store + Client Sync
   const dataset = await gatherLiveSupabaseRagDataset(req);
+  if (Array.isArray(clientComplaints) && clientComplaints.length > 0) {
+    const existingIds = new Set(
+      dataset.complaints.map((c) => String(c.id || '').replace(/^#/, '').toLowerCase())
+    );
+    for (const cc of clientComplaints) {
+      if (!cc || !cc.id) continue;
+      const cleanCcId = String(cc.id).replace(/^#/, '').toLowerCase();
+      if (!existingIds.has(cleanCcId) && !LEGACY_SEED_COMPLAINT_IDS.has(String(cc.id).replace(/^#/, ''))) {
+        dataset.complaints.push(normalizeComplaint(cc));
+        existingIds.add(cleanCcId);
+      }
+    }
+  }
   const ragContext = retrieveRelevantRagContext(message, dataset, activeUser);
 
   // 2. Check if Maps Grounding should be activated
   const qLower = String(message).toLowerCase();
   const isLocationQuery =
     Boolean(useMapsGrounding) ||
-    qLower.includes('map') ||
-    qLower.includes('near') ||
-    qLower.includes('paas') ||
+    /\b(map|maps|nearest|nearby|direction|directions|route|hospital|police\s*station)\b/i.test(qLower) ||
     qLower.includes('aas paas') ||
-    qLower.includes('kaha') ||
-    qLower.includes('where') ||
-    qLower.includes('location') ||
-    qLower.includes('address') ||
-    qLower.includes('hospital') ||
-    qLower.includes('office') ||
-    qLower.includes('station') ||
-    qLower.includes('direction');
+    qLower.includes('aas-paas') ||
+    qLower.includes('kaha hai') ||
+    qLower.includes('kahan hai') ||
+    qLower.includes('where is');
 
-  // Allowed models per @google/genai guidelines:
-  // If Maps Grounding is used, MUST use 'gemini-2.5-flash' with googleMaps tool
-  const modelAliasMap = {
-    'gemini-3.8-flash': 'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite': 'gemini-3-flash-preview',
-    'gemini-4-argon': 'gemini-3.1-pro-preview',
-    'gemini-3-flash-preview': 'gemini-3-flash-preview',
-    'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
-    'gemini-2.5-flash': 'gemini-2.5-flash'
-  };
-  const selectedModel = isLocationQuery
-    ? 'gemini-2.5-flash'
-    : modelAliasMap[requestedModel] || 'gemini-3-flash-preview';
+  // Candidate models ordered for fast sub-2s response:
+  // 'gemini-3.1-flash-lite' responds in ~1.5s in AI Studio; also supports 'gemini-3.8-flash', 'gemini-4-argon', 'gemini-2.5-flash'.
+  const primaryModel = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-4-argon', 'gemini-flash-latest', 'gemini-2.5-flash'].includes(
+    requestedModel
+  )
+    ? requestedModel
+    : 'gemini-3.8-flash';
+
+  const candidateModels = Array.from(
+    new Set([
+      'gemini-3.1-flash-lite',
+      primaryModel,
+      'gemini-2.5-flash'
+    ])
+  );
 
   const systemInstruction = `You are the official "Civic Connect AI Assistant" (Powered by Live Supabase RAG & Google Maps Grounding) for the CIRRS (Civic Issue Reporting & Resolution System) platform.
-You help Citizens, Municipal Officers, and Super Admins in Hindi, Hinglish, and English (match the user's language).
+You help Citizens, Municipal Officers, and Super Admins in Hindi, Hinglish, and English (match the user's language and tone).
 
 CRITICAL RAG INSTRUCTIONS:
-1. Always ground your answers strictly in the LIVE SUPABASE DATABASE CONTEXT provided below.
-2. Cite exact Complaint IDs (e.g., #CC10246, #CMP-10245), statuses, priorities, wards, assigned field squads, and officer verification statuses when answering questions about complaints, users, or municipalities.
-3. If the live database currently has 0 complaints or a specific ticket is not found, state that honestly based on the live Supabase snapshot and guide the user on how to report or track an issue.
-4. For Municipal Officer login questions, explain the Two-Tier Verification rule:
+1. Directly answer the user's exact question first! Never repeat a generic template—tailor every single response specifically to what the user just asked.
+2. Ground your factual answers about complaints, users, officers, or field squads in the LIVE SUPABASE DATABASE CONTEXT below.
+3. Cite exact Complaint IDs (e.g., #CC10246, #CMP-10245), statuses, priorities, wards, assigned field squads, and officer verification statuses when relevant to the user's question.
+4. If the user asks about SLA rules, how to report an issue, civic procedures, or general guidance, explain clearly and concisely while referencing live database counts if helpful.
+5. For Municipal Officer login questions, explain the Two-Tier Verification rule:
    - Citizen: Verifies via Email only, then can log in.
    - Municipal Officer: Must verify via Email (Step 1) AND be verified/approved by the Super Admin in the CIRRS Admin Console (/civic-connect/admin/login -> Municipality Management) before login is permitted (Step 2).
 
@@ -3347,7 +3642,7 @@ ${JSON.stringify({
   recentWorkorders: ragContext.workorders.slice(0, 3)
 })}
 
-Keep responses helpful, structured with clear bullet points, and concise.`;
+Keep responses helpful, directly focused on the user's question, structured with clear bullet points, and concise.`;
 
   const ai = getGeminiClient();
   if (!ai) {
@@ -3355,123 +3650,152 @@ Keep responses helpful, structured with clear bullet points, and concise.`;
       message,
       ragContext,
       activeUser,
-      dataset.supabaseConnected
+      dataset.supabaseConnected,
+      userLocation
     );
-    return res.json({
-      reply: fallbackReply,
-      model: `${selectedModel} (RAG Engine)`,
-      supabaseConnected: dataset.supabaseConnected,
-      ragStats: ragContext.stats,
-      ragSources: ragContext.ragSources,
-      mapsLinks: []
-    });
-  }
-
-  try {
-    // Build multi-turn conversation history for Gemini
-    const formattedContents = [];
-    if (Array.isArray(history)) {
-      for (const turn of history.slice(-10)) {
-        if (!turn || !turn.content) continue;
-        formattedContents.push({
-          role: turn.role === 'assistant' || turn.role === 'model' ? 'model' : 'user',
-          parts: [{ text: String(turn.content) }]
-        });
-      }
-    }
-    formattedContents.push({
-      role: 'user',
-      parts: [{ text: String(message) }]
-    });
-
-    const genConfig = {
-      systemInstruction,
-      temperature: 0.4
-    };
-
-    if (isLocationQuery) {
-      genConfig.tools = [{ googleMaps: {} }];
-      const lat = Number(userLocation?.latitude) || 22.7533;
-      const lng = Number(userLocation?.longitude) || 75.8937;
-      genConfig.toolConfig = {
-        retrievalConfig: {
-          latLng: {
-            latitude: lat,
-            longitude: lng
-          }
-        }
-      };
-    }
-
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: selectedModel,
-        contents: formattedContents,
-        config: genConfig
-      }),
-      6500,
-      'Gemini RAG generateContent'
-    );
-
-    const replyText =
-      response.text ||
-      buildDeterministicRagReply(message, ragContext, activeUser, dataset.supabaseConnected);
-    let mapsLinks = extractMapsGroundingLinks(response);
-    if (isLocationQuery && mapsLinks.length === 0) {
-      const lat = Number(userLocation?.latitude) || 22.7533;
-      const lng = Number(userLocation?.longitude) || 75.8937;
-      mapsLinks = [
-        {
-          uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-            `${message} near ${lat},${lng}`
-          )}`,
-          title: `Open "${message.slice(0, 36)}" on Google Maps`,
-          reviewSnippets: []
-        }
-      ];
-    }
-
-    return res.json({
-      reply: replyText,
-      model: selectedModel,
-      mapsGroundingUsed: isLocationQuery,
-      supabaseConnected: dataset.supabaseConnected,
-      ragStats: ragContext.stats,
-      ragSources: ragContext.ragSources,
-      mapsLinks
-    });
-  } catch (err) {
-    console.warn('[Civic Connect] Gemini RAG chat fallback:', err.message);
     const lat = Number(userLocation?.latitude) || 22.7533;
     const lng = Number(userLocation?.longitude) || 75.8937;
-    const fallbackMapsLinks = isLocationQuery
-      ? [
-          {
-            uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-              `Municipal Office near ${lat},${lng}`
-            )}`,
-            title: 'View Nearby Municipal Offices on Google Maps',
-            reviewSnippets: []
-          }
-        ]
-      : [];
-
-    const fallbackReply = buildDeterministicRagReply(
-      message,
-      ragContext,
-      activeUser,
-      dataset.supabaseConnected
-    );
     return res.json({
       reply: fallbackReply,
-      model: `${selectedModel} (Supabase RAG)`,
+      model: `${primaryModel} (RAG NLU Engine)`,
       mapsGroundingUsed: isLocationQuery,
       supabaseConnected: dataset.supabaseConnected,
       ragStats: ragContext.stats,
       ragSources: ragContext.ragSources,
-      mapsLinks: fallbackMapsLinks
+      mapsLinks: isLocationQuery
+        ? [
+            {
+              uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                `Municipal Office near ${lat},${lng}`
+              )}`,
+              title: 'Open Nearby Municipal Locations on Google Maps',
+              reviewSnippets: []
+            }
+          ]
+        : []
     });
   }
+
+  const formattedContents = normalizeGeminiContents(history, message);
+
+  let lastError = null;
+  for (const modelName of candidateModels) {
+    try {
+      // Do NOT pass deprecated temperature parameter to gemini-3.8-flash or gemini-4-argon
+      const genConfig = {
+        systemInstruction
+      };
+
+      // Attach Google Maps grounding tool only on gemini-2.5-flash; for gemini-3.1-flash-lite / 3.8-flash use direct GPS context + Maps link
+      const tryWithMaps = isLocationQuery && modelName === 'gemini-2.5-flash';
+      if (tryWithMaps) {
+        genConfig.tools = [{ googleMaps: {} }];
+        const lat = Number(userLocation?.latitude) || 22.7533;
+        const lng = Number(userLocation?.longitude) || 75.8937;
+        genConfig.toolConfig = {
+          retrievalConfig: {
+            latLng: {
+              latitude: lat,
+              longitude: lng
+            }
+          }
+        };
+      }
+
+      let response;
+      try {
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: modelName,
+            contents: formattedContents,
+            config: genConfig
+          }),
+          8000,
+          `Gemini RAG (${modelName})`
+        );
+      } catch (innerErr) {
+        // If Google Maps tool caused a model/config error, immediately retry without tools on the same model
+        if (tryWithMaps) {
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: modelName,
+              contents: formattedContents,
+              config: { systemInstruction }
+            }),
+            8000,
+            `Gemini RAG retry (${modelName})`
+          );
+        } else {
+          throw innerErr;
+        }
+      }
+
+      const replyText = (response?.text || '').trim();
+      if (!replyText) {
+        throw new Error(`Empty response text from ${modelName}`);
+      }
+
+      let mapsLinks = extractMapsGroundingLinks(response);
+      if (isLocationQuery && mapsLinks.length === 0) {
+        const lat = Number(userLocation?.latitude) || 22.7533;
+        const lng = Number(userLocation?.longitude) || 75.8937;
+        mapsLinks = [
+          {
+            uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+              `${message} near ${lat},${lng}`
+            )}`,
+            title: `Open "${message.slice(0, 36)}" on Google Maps`,
+            reviewSnippets: []
+          }
+        ];
+      }
+
+      return res.json({
+        reply: replyText,
+        model: modelName,
+        mapsGroundingUsed: isLocationQuery,
+        supabaseConnected: dataset.supabaseConnected,
+        ragStats: ragContext.stats,
+        ragSources: ragContext.ragSources,
+        mapsLinks
+      });
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Civic Connect] Gemini model ${modelName} attempt note:`, err.message);
+    }
+  }
+
+  console.warn('[Civic Connect] All Gemini models unavailable, using Intent-Aware RAG Synthesizer:', lastError?.message);
+  const lat = Number(userLocation?.latitude) || 22.7533;
+  const lng = Number(userLocation?.longitude) || 75.8937;
+  const fallbackMapsLinks = isLocationQuery
+    ? [
+        {
+          uri: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `Municipal Office near ${lat},${lng}`
+          )}`,
+          title: 'View Nearby Municipal Offices on Google Maps',
+          reviewSnippets: []
+        }
+      ]
+    : [];
+
+  const fallbackReply = buildDeterministicRagReply(
+    message,
+    ragContext,
+    activeUser,
+    dataset.supabaseConnected,
+    userLocation
+  );
+  return res.json({
+    reply: fallbackReply,
+    model: `${primaryModel} (RAG NLU Engine)`,
+    mapsGroundingUsed: isLocationQuery,
+    supabaseConnected: dataset.supabaseConnected,
+    ragStats: ragContext.stats,
+    ragSources: ragContext.ragSources,
+    mapsLinks: fallbackMapsLinks
+  });
 });
 
 // ============================================================================
