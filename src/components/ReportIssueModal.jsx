@@ -76,7 +76,7 @@ const PRESET_ISSUES = [
   }
 ];
 
-export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
+export default function ReportIssueModal({ isOpen, currentUser, onClose, onSubmitSuccess }) {
   const [step, setStep] = useState(1); // 1: Upload/Select -> 2: AI Triage -> 3: Confirmation
   const [selectedPreset, setSelectedPreset] = useState(PRESET_ISSUES[0]);
   const [customTitle, setCustomTitle] = useState('');
@@ -112,7 +112,7 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !currentUser || !currentUser.email) return null;
 
   const handleSelectPreset = (preset) => {
     setSelectedPreset(preset);
@@ -151,6 +151,11 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
   };
 
   const handleFinalSubmit = () => {
+    if (!currentUser || !currentUser.email) {
+      onClose();
+      return;
+    }
+
     try {
       confetti({
         particleCount: 80,
@@ -174,7 +179,9 @@ export default function ReportIssueModal({ isOpen, onClose, onSubmitSuccess }) {
       aiDetected: selectedPreset.aiDetected || 'Municipal Infrastructure Defect',
       dimensions: selectedPreset.dimensions || 'Standard Urban Defect',
       image: customImage,
-      description: customDescription
+      description: customDescription,
+      citizenName: currentUser.name,
+      citizenEmail: currentUser.email
     };
 
     onSubmitSuccess(complaintData);

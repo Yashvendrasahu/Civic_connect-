@@ -275,16 +275,6 @@ export default function MyComplaintsPage({
                       <Award className="w-4 h-4 text-emerald-600" />
                       <span>Download Civic Certificate</span>
                     </button>
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        onSwitchUserRole();
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-blue-50 text-slate-700 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Building2 className="w-4 h-4 text-blue-600" />
-                      <span>Switch to Municipal Officer Portal</span>
-                    </button>
                   </div>
                   <div className="pt-1 border-t border-slate-100">
                     <button

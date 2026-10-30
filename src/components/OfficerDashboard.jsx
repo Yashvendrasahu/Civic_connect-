@@ -1520,16 +1520,14 @@ export default function OfficerDashboard({
               />
             </div>
 
-            {/* Switch to Citizen View helper button */}
-            {onSwitchUserRole && (
-              <button
-                onClick={onSwitchUserRole}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-[11px] font-bold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                title="Switch to Citizen Portal"
-              >
-                <span>Citizen View</span>
-              </button>
-            )}
+            {/* Verified Municipal Officer RBAC Badge */}
+            <div
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-700"
+              title="Role-Based Access Control: Municipal Officer Jurisdiction"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+              <span>Municipal Officer Access</span>
+            </div>
 
             {/* Notification Bell */}
             <button

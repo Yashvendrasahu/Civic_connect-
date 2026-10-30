@@ -350,15 +350,52 @@ export const civicDataService = {
     }
   },
 
-  // 1. Fetch complaints (Express + Native Supabase API -> Local Cache fallback)
+  // 1. Fetch complaints (Express + Native Supabase API -> Local Cache fallback, strictly role-scoped)
   async getComplaints(filter = 'all') {
+    const activeUser = getStoredUser();
+    const role = (activeUser?.role || '').toLowerCase();
+    const userEmail = (activeUser?.email || '').trim().toLowerCase();
+    const userCity = (activeUser?.city || '').trim();
+
+    const applyClientRoleScope = (list) => {
+      if (!Array.isArray(list)) return [];
+      if (!activeUser || !role) return list;
+      if (role === 'citizen') {
+        if (!userEmail) return [];
+        return list.filter(
+          (c) => String(c.citizenEmail || c.citizen_email || '').trim().toLowerCase() === userEmail
+        );
+      }
+      if (role === 'officer') {
+        const cleanCity = userCity
+          .toLowerCase()
+          .replace(/municipal corporation|nagar nigam|smart city|madhya pradesh|mp/gi, '')
+          .split(',')[0]
+          .trim();
+        if (!cleanCity || cleanCity === 'indore') return list;
+        return list.filter((c) => {
+          const blob = `${c.location || ''} ${c.ward || ''} ${c.department || ''}`.toLowerCase();
+          return blob.includes(cleanCity) || !c.location || blob.includes('ward');
+        });
+      }
+      return list;
+    };
+
     try {
-      const res = await apiFetch(`/api/complaints${filter !== 'all' ? `?filter=${filter}` : ''}`);
+      const params = new URLSearchParams();
+      if (filter !== 'all') params.set('filter', filter);
+      if (role) params.set('role', role);
+      if (userEmail) params.set('viewer_email', userEmail);
+      if (userCity) params.set('viewer_city', userCity);
+      const qs = params.toString();
+
+      const res = await apiFetch(`/api/complaints${qs ? `?${qs}` : ''}`);
       if (res.ok) {
         const data = await res.json();
         const normalized = Array.isArray(data) ? data.map(normalizeComplaintRow) : [];
-        saveStoredComplaints(normalized);
-        return normalized;
+        const scoped = applyClientRoleScope(normalized);
+        saveStoredComplaints(scoped);
+        return scoped;
       }
     } catch (err) {
       console.warn('API fetch complaints fallback:', err);
@@ -367,6 +404,9 @@ export const civicDataService = {
     if (supabase && activeCredentials.isRealCloud) {
       try {
         let query = supabase.from('complaints').select('*').order('created_at', { ascending: false });
+        if (role === 'citizen' && userEmail) {
+          query = query.ilike('citizen_email', userEmail);
+        }
         if (filter === 'active') {
           query = query.in('status', ['In Progress', 'Assigned', 'Submitted', 'Needs Verification']);
         } else if (filter === 'resolved') {
@@ -377,15 +417,16 @@ export const civicDataService = {
           const normalized = data
             .map(normalizeComplaintRow)
             .filter((c) => c && !LEGACY_SEED_IDS.has(String(c.id).replace(/^#/, '')));
-          saveStoredComplaints(normalized);
-          return normalized;
+          const scoped = applyClientRoleScope(normalized);
+          saveStoredComplaints(scoped);
+          return scoped;
         }
       } catch (err) {
         console.warn('Direct Supabase query fallback:', err);
       }
     }
 
-    const complaints = getStoredComplaints();
+    const complaints = applyClientRoleScope(getStoredComplaints());
     if (filter === 'active') {
       return complaints.filter(
         (c) => c.status === 'In Progress' || c.status === 'Assigned' || c.status === 'Submitted'
@@ -413,13 +454,17 @@ export const civicDataService = {
     return complaints.find((c) => c.id === cleanId || c.id === ticketId) || null;
   },
 
-  // 3. Submit new complaint (Express + Supabase Storage & Database)
+  // 3. Submit new complaint (Express + Supabase Storage & Database — Strictly requires authentication)
   async submitComplaint(complaintData) {
     const currentUser = getStoredUser();
+    if (!currentUser || !currentUser.email) {
+      throw new Error('बिना लॉगिन के शिकायत सबमिट नहीं हो सकती। कृपया पहले अपने Citizen अकाउंट से लॉगिन करें (Authentication required).');
+    }
+
     const payload = {
       ...complaintData,
-      citizenName: currentUser?.name || complaintData.citizenName || 'Priya Sharma',
-      citizenEmail: currentUser?.email || complaintData.citizenEmail || 'priya.sharma@example.com'
+      citizenName: currentUser.name || complaintData.citizenName || 'Verified Citizen',
+      citizenEmail: currentUser.email
     };
 
     try {
@@ -427,6 +472,10 @@ export const civicDataService = {
         method: 'POST',
         body: JSON.stringify(payload)
       });
+      if (res.status === 401 || res.status === 403) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || 'Authentication required to submit a complaint.');
+      }
       if (res.ok) {
         const apiTicket = normalizeComplaintRow(await res.json());
         const stored = getStoredComplaints();
@@ -434,6 +483,9 @@ export const civicDataService = {
         return apiTicket;
       }
     } catch (err) {
+      if (err.message && (err.message.includes('Authentication') || err.message.includes('लॉगिन'))) {
+        throw err;
+      }
       console.warn('API submit complaint fallback:', err);
     }
 

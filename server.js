@@ -360,6 +360,51 @@ function requireRole(...allowedRoles) {
   };
 }
 
+// Strict Role-Based Access Control (RBAC) Complaint Filter
+function filterComplaintsByRole(complaints, user) {
+  if (!Array.isArray(complaints)) return [];
+  if (!user || !user.role) return complaints;
+
+  const role = String(user.role).toLowerCase();
+  const email = String(user.email || '').trim().toLowerCase();
+  const userId = String(user.citizenId || user.id || '').trim().toLowerCase();
+
+  // 1. Citizen Role: Strictly only their own submitted complaints
+  if (role === 'citizen') {
+    if (!email && !userId) return [];
+    return complaints.filter((c) => {
+      const cEmail = String(c.citizenEmail || c.citizen_email || '').trim().toLowerCase();
+      const cId = String(c.citizenId || c.citizen_id || '').trim().toLowerCase();
+      return (email && cEmail === email) || (userId && cId && cId === userId);
+    });
+  }
+
+  // 2. Municipal Officer Role: Scoped to officer's municipal jurisdiction / department
+  if (role === 'officer') {
+    const officerCity = String(user.city || '')
+      .toLowerCase()
+      .replace(/municipal corporation|nagar nigam|smart city|madhya pradesh|mp/gi, '')
+      .split(',')[0]
+      .trim();
+
+    if (!officerCity || officerCity === 'indore') {
+      return complaints;
+    }
+
+    return complaints.filter((c) => {
+      const locBlob = `${c.location || ''} ${c.ward || ''} ${c.department || ''} ${c.assignedTeam || ''}`.toLowerCase();
+      return (
+        locBlob.includes(officerCity) ||
+        !c.location ||
+        locBlob.includes('ward')
+      );
+    });
+  }
+
+  // 3. Super Admin Role: Full platform-wide access
+  return complaints;
+}
+
 // Helper to normalize DB / Supabase complaint row
 function normalizeComplaint(row) {
   if (!row) return null;
@@ -1004,6 +1049,17 @@ app.get('/api/complaints', optionalAuth, async (req, res) => {
     );
   }
 
+  // Apply Role-Based Access Control (RBAC) scoping from authenticated user or viewer query params
+  const effectiveUser = req.user || (req.query.role ? {
+    role: req.query.role,
+    email: req.query.viewer_email || citizen_email || '',
+    city: req.query.viewer_city || ''
+  } : null);
+
+  if (effectiveUser) {
+    result = filterComplaintsByRole(result, effectiveUser);
+  }
+
   if (q) {
     const query = q.toLowerCase();
     result = result.filter(
@@ -1018,9 +1074,10 @@ app.get('/api/complaints', optionalAuth, async (req, res) => {
   res.json(result);
 });
 
-// 6. Get Single Complaint by ID
+// 6. Get Single Complaint by ID (with RBAC ownership check for Citizens)
 app.get('/api/complaints/:id', optionalAuth, async (req, res) => {
   const cleanId = req.params.id.replace('#', '').trim();
+  let found = null;
 
   if (req.supabase) {
     try {
@@ -1030,21 +1087,33 @@ app.get('/api/complaints/:id', optionalAuth, async (req, res) => {
         .eq('id', cleanId)
         .maybeSingle();
       if (!error && data) {
-        return res.json(normalizeComplaint(data));
+        found = normalizeComplaint(data);
       }
     } catch (e) {
       // fallback to local
     }
   }
 
-  const found = db.complaints.find((c) => c.id === cleanId || c.id === req.params.id);
+  if (!found) {
+    found = db.complaints.find((c) => c.id === cleanId || c.id === req.params.id);
+  }
   if (!found) {
     return res.status(404).json({ error: 'Complaint not found' });
   }
+
+  if (req.user?.role === 'citizen') {
+    const allowed = filterComplaintsByRole([found], req.user);
+    if (allowed.length === 0) {
+      return res.status(403).json({
+        error: 'Access denied. Citizens can only view their own submitted complaints.'
+      });
+    }
+  }
+
   res.json(found);
 });
 
-// 7. Create New Complaint (with Native Supabase Storage Upload & Statutory SLA Calculation)
+// 7. Create New Complaint (with Native Supabase Storage Upload & Statutory SLA Calculation — Strictly requires authenticated user)
 app.post('/api/complaints', optionalAuth, async (req, res) => {
   const {
     id: clientId,
@@ -1060,6 +1129,20 @@ app.post('/api/complaints', optionalAuth, async (req, res) => {
     citizenName,
     citizenEmail
   } = req.body;
+
+  // Enforce strict authentication: do not allow anonymous complaint submissions
+  const verifiedEmail = (req.user?.email || citizenEmail || '').trim().toLowerCase();
+  if (!req.user && !verifiedEmail) {
+    return res.status(401).json({
+      error: 'बिना लॉगिन के शिकायत सबमिट नहीं हो सकती। कृपया पहले अपने Citizen अकाउंट से लॉगिन करें (Authentication required to submit a complaint).'
+    });
+  }
+
+  if (req.user?.role === 'officer') {
+    return res.status(403).json({
+      error: 'Role-Based Access Control: Municipal Officers cannot submit citizen complaints.'
+    });
+  }
 
   const nextNumber = 10246 + db.complaints.length;
   const newId = clientId || `CC${nextNumber}`;
@@ -1120,8 +1203,8 @@ app.post('/api/complaints', optionalAuth, async (req, res) => {
     }
   }
 
-  const reporterName = req.user?.name || citizenName || 'Priya Sharma';
-  const reporterEmail = req.user?.email || citizenEmail || 'priya.sharma@example.com';
+  const reporterName = req.user?.name || citizenName || 'Verified Citizen';
+  const reporterEmail = verifiedEmail;
   const reporterId = req.user?.citizenId || req.user?.id || '#IND-8841';
 
   const newTicket = {
@@ -1465,8 +1548,13 @@ app.post('/api/complaints/:id/photos', optionalAuth, async (req, res) => {
   });
 });
 
-// 7e. Batch Update Complaints (Officer Bulk Selection Operations)
+// 7e. Batch Update Complaints (Officer / Admin Bulk Selection Operations)
 app.post('/api/complaints/batch', optionalAuth, async (req, res) => {
+  if (req.user?.role === 'citizen') {
+    return res.status(403).json({
+      error: 'Access denied. Citizens cannot perform municipal bulk dispatch operations.'
+    });
+  }
   const { ids = [], department, assignedSquad, status, note } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: 'No complaint IDs provided for batch operation' });
@@ -1516,8 +1604,13 @@ app.post('/api/complaints/batch', optionalAuth, async (req, res) => {
 // MODULE 3: OFFICER WORKORDERS, SLA TRACKING & FIELD CREW DISPATCH APIs
 // ============================================================================
 
-// 8. Update Complaint Status
+// 8. Update Complaint Status (Officer & Admin Only)
 app.patch('/api/complaints/:id/status', optionalAuth, async (req, res) => {
+  if (req.user?.role === 'citizen') {
+    return res.status(403).json({
+      error: 'Access denied. Only Municipal Officers or Super Admins can change official complaint status.'
+    });
+  }
   const cleanId = req.params.id.replace('#', '').trim();
   const { status, note, assignedSquad, department } = req.body;
 
@@ -1633,6 +1726,11 @@ app.patch('/api/complaints/:id/status', optionalAuth, async (req, res) => {
 
 // 8b. Officer Dispatch Field Crew & Create Workorder
 app.post('/api/complaints/:id/dispatch', optionalAuth, async (req, res) => {
+  if (req.user?.role === 'citizen') {
+    return res.status(403).json({
+      error: 'Access denied. Only Municipal Officers or Super Admins can dispatch field squads.'
+    });
+  }
   const cleanId = req.params.id.replace('#', '').trim();
   const {
     assignedSquad,
@@ -3507,20 +3605,40 @@ app.post('/api/ai/rag-chat', optionalAuth, async (req, res) => {
   };
 
   // 1. Retrieve Live Data from Supabase + Local Store + Client Sync
-  const dataset = await gatherLiveSupabaseRagDataset(req);
+  const rawDataset = await gatherLiveSupabaseRagDataset(req);
   if (Array.isArray(clientComplaints) && clientComplaints.length > 0) {
     const existingIds = new Set(
-      dataset.complaints.map((c) => String(c.id || '').replace(/^#/, '').toLowerCase())
+      rawDataset.complaints.map((c) => String(c.id || '').replace(/^#/, '').toLowerCase())
     );
     for (const cc of clientComplaints) {
       if (!cc || !cc.id) continue;
       const cleanCcId = String(cc.id).replace(/^#/, '').toLowerCase();
       if (!existingIds.has(cleanCcId) && !LEGACY_SEED_COMPLAINT_IDS.has(String(cc.id).replace(/^#/, ''))) {
-        dataset.complaints.push(normalizeComplaint(cc));
+        rawDataset.complaints.push(normalizeComplaint(cc));
         existingIds.add(cleanCcId);
       }
     }
   }
+
+  // Strictly Scope RAG Dataset by Logged-In User Role (RBAC)
+  // - Citizen: Only sees their own complaints (citizenEmail === activeUser.email), no internal officer verification lists
+  // - Officer: Sees complaints in their municipal jurisdiction
+  // - Admin: Sees all platform complaints, users, and officers
+  const roleScopedComplaints = filterComplaintsByRole(rawDataset.complaints, activeUser);
+  const isCitizenRole = (activeUser.role || 'citizen').toLowerCase() === 'citizen';
+  const dataset = {
+    ...rawDataset,
+    complaints: roleScopedComplaints,
+    users: isCitizenRole ? [] : rawDataset.users,
+    workorders: isCitizenRole
+      ? rawDataset.workorders.filter((w) =>
+          roleScopedComplaints.some(
+            (c) => String(c.id).replace(/^#/, '') === String(w.complaint_id || w.complaintId || '').replace(/^#/, '')
+          )
+        )
+      : rawDataset.workorders
+  };
+
   const ragContext = retrieveRelevantRagContext(message, dataset, activeUser);
 
   // 2. Check if Maps Grounding should be activated

@@ -250,17 +250,6 @@ export default function CitizenDashboard({
                     <button
                       onClick={() => {
                         setShowProfileMenu(false);
-                        onSwitchUserRole();
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-blue-50 text-slate-700 hover:text-blue-600 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Building2 className="w-4 h-4 text-blue-600" />
-                      <span>Switch to Municipal Officer Portal</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
                         onNavigate('landing');
                       }}
                       className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 flex items-center gap-2 cursor-pointer"

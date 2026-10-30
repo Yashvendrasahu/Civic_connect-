@@ -67,7 +67,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Load dynamic data on mount & subscribe to background updates
+  // Load dynamic data on mount & whenever logged-in user role/email changes
   useEffect(() => {
     async function loadData() {
       const allComplaints = await civicDataService.getComplaints();
@@ -87,7 +87,7 @@ export default function App() {
     return () => {
       if (typeof unsubRealtime === 'function') unsubRealtime();
     };
-  }, []);
+  }, [currentUser?.email, currentUser?.role]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -96,45 +96,83 @@ export default function App() {
     }, 3500);
   };
 
+  // Strict RBAC: Role switching without re-authentication is blocked
   const handleSwitchUserRole = () => {
-    if (currentUser?.role === 'officer' || activeView === 'officer-dashboard') {
-      const citizen = civicDataService.switchToCitizen();
-      setCurrentUser(citizen);
-      setActiveView('my-complaints');
-      showToast(`Switched to Citizen Profile: ${citizen?.name || 'Priya Sharma'}`);
-    } else {
-      const officer = civicDataService.switchToOfficer();
-      setCurrentUser(officer);
+    if (!currentUser) {
+      setAuthMode('login');
+      setActiveView('login');
+      showToast('Please sign in with your Citizen or Municipal Officer account.');
+      return;
+    }
+    if (currentUser.role === 'citizen') {
+      showToast('Role-Based Access Control: Citizens can only access the Citizen Portal. Sign out to log in as a Municipal Officer.');
+      setActiveView('dashboard');
+    } else if (currentUser.role === 'officer') {
+      showToast('Role-Based Access Control: Municipal Officers can only access the Officer Portal. Sign out to log in as a Citizen.');
       setActiveView('officer-dashboard');
-      showToast(`Switched to Municipal Officer Profile: ${officer?.name || 'Rajesh Sharma'}`);
     }
   };
 
   const handleNavigate = (view) => {
+    const role = currentUser?.role;
+
     if (view === 'login') {
       setAuthMode('login');
       setActiveView('login');
     } else if (view === 'register') {
       setAuthMode('register');
       setActiveView('register');
-    } else if (view === 'report-issue') {
-      setActiveView('report-issue');
+    } else if (view === 'municipal-portal' || view === 'officer-dashboard') {
+      if (!currentUser) {
+        setAuthMode('login');
+        setActiveView('login');
+        showToast('Please log in with a verified Municipal Officer account.');
+      } else if (role === 'officer') {
+        setActiveView('officer-dashboard');
+      } else if (role === 'admin') {
+        setActiveView('admin-dashboard');
+      } else {
+        showToast('Access Denied (RBAC): Citizens cannot access the Municipal Officer Portal.');
+        setActiveView('dashboard');
+      }
+    } else if (view === 'admin-dashboard') {
+      if (role === 'admin') {
+        setActiveView('admin-dashboard');
+      } else {
+        setActiveView('admin-login');
+        showToast('Super Admin authentication required.');
+      }
+    } else if (view === 'report-issue' || view === 'my-complaints' || view === 'history' || view === 'tracker' || view === 'dashboard') {
+      if (!currentUser) {
+        setAuthMode('login');
+        setActiveView('login');
+        showToast('Please sign in with your Citizen account to continue.');
+      } else if (role === 'officer') {
+        showToast('Role-Based Access Control: Redirected to your Municipal Officer Portal.');
+        setActiveView('officer-dashboard');
+      } else if (role === 'admin') {
+        setActiveView('admin-dashboard');
+      } else {
+        setActiveView(view === 'history' || view === 'tracker' ? 'my-complaints' : view);
+      }
     } else if (view === 'profile-settings' || view === 'settings') {
       if (!currentUser) {
-        const citizen = civicDataService.switchToCitizen();
-        setCurrentUser(citizen);
+        setAuthMode('login');
+        setActiveView('login');
+        showToast('Please sign in to manage your profile settings.');
+      } else if (role === 'officer') {
+        setActiveView('officer-dashboard');
+      } else {
+        setActiveView('profile-settings');
       }
-      setActiveView('profile-settings');
-    } else if (view === 'history' || view === 'tracker') {
-      setActiveView('my-complaints');
     } else if (view === 'notifications') {
-      setActiveView(currentUser?.role === 'officer' ? 'officer-dashboard' : 'dashboard');
-      showToast('Showing latest municipal notifications & alerts.');
-    } else if (view === 'municipal-portal') {
-      const officer = civicDataService.switchToOfficer();
-      setCurrentUser(officer);
-      setActiveView('officer-dashboard');
-      showToast(`Entered Municipal Officer Portal: ${officer?.name || 'Rajesh Sharma'}`);
+      if (!currentUser) {
+        setAuthMode('login');
+        setActiveView('login');
+      } else {
+        setActiveView(role === 'officer' ? 'officer-dashboard' : 'dashboard');
+        showToast('Showing latest notifications for your account.');
+      }
     } else if (['privacy', 'terms', 'governance', 'security', 'support', 'contact', 'help'].includes(view)) {
       setInfoModalType(view);
       return;
@@ -146,16 +184,7 @@ export default function App() {
         if (el) el.scrollIntoView({ behavior: 'smooth' });
       }, 100);
       return;
-    } else if (
-      [
-        'landing',
-        'dashboard',
-        'my-complaints',
-        'officer-dashboard',
-        'admin-dashboard',
-        'admin-login'
-      ].includes(view)
-    ) {
+    } else if (view === 'admin-login' || view === 'landing') {
       setActiveView(view);
     } else {
       setActiveView('landing');
@@ -163,9 +192,11 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLoginSuccess = (user) => {
+  const handleLoginSuccess = async (user) => {
     setCurrentUser(user);
     civicDataService.setCurrentUser(user);
+    const scopedComplaints = await civicDataService.getComplaints();
+    setComplaints(scopedComplaints);
     showToast(`Welcome back, ${user?.name || 'User'}!`);
     if (user?.role === 'admin') {
       window.history.pushState({}, '', '/civic-connect/admin');
@@ -214,16 +245,54 @@ export default function App() {
     showToast('All notifications and updates marked as read.');
   };
 
+  const handleOpenReportIssue = () => {
+    if (!currentUser || !currentUser.email) {
+      setIsReportModalOpen(false);
+      setAuthMode('login');
+      setActiveView('login');
+      showToast('बिना लॉगिन के शिकायत सबमिट नहीं हो सकती। कृपया पहले Citizen अकाउंट से लॉगिन करें (Please sign in to report an issue).');
+      return;
+    }
+    if (currentUser.role === 'officer') {
+      showToast('Role-Based Access Control: Municipal Officers cannot file citizen complaints. Redirected to Officer Portal.');
+      setActiveView('officer-dashboard');
+      return;
+    }
+    if (currentUser.role === 'admin') {
+      showToast('Super Admin Console active. Switch to a Citizen account to file a report.');
+      setActiveView('admin-dashboard');
+      return;
+    }
+    setActiveView('report-issue');
+  };
+
   const handleReportSubmitSuccess = async (complaintData) => {
-    const newComplaint = await civicDataService.submitComplaint(complaintData);
-    const updatedComplaints = await civicDataService.getComplaints();
-    const updatedNotifications = await civicDataService.getNotifications();
-    const updatedTimeline = await civicDataService.getTimelineUpdates();
-    setComplaints(updatedComplaints);
-    setNotifications(updatedNotifications);
-    setTimelineUpdates(updatedTimeline);
-    showToast(`Ticket #${newComplaint.id} submitted! Auto-routed to ${newComplaint.assignedTeam}`);
-    setActiveView('my-complaints');
+    if (!currentUser || !currentUser.email) {
+      setIsReportModalOpen(false);
+      setAuthMode('login');
+      setActiveView('login');
+      showToast('बिना लॉगिन के शिकायत सबमिट नहीं हो सकती। कृपया पहले लॉगिन करें (Authentication required to submit a complaint).');
+      return;
+    }
+    try {
+      const newComplaint = await civicDataService.submitComplaint({
+        ...complaintData,
+        citizenName: currentUser.name,
+        citizenEmail: currentUser.email
+      });
+      const updatedComplaints = await civicDataService.getComplaints();
+      const updatedNotifications = await civicDataService.getNotifications();
+      const updatedTimeline = await civicDataService.getTimelineUpdates();
+      setComplaints(updatedComplaints);
+      setNotifications(updatedNotifications);
+      setTimelineUpdates(updatedTimeline);
+      showToast(`Ticket #${newComplaint.id} submitted! Auto-routed to ${newComplaint.assignedTeam}`);
+      setActiveView('my-complaints');
+    } catch (err) {
+      showToast(err.message || 'Authentication required. Please log in to submit a complaint.');
+      setAuthMode('login');
+      setActiveView('login');
+    }
   };
 
   const refreshAllCivicData = async (focusTicketId = '') => {
@@ -316,13 +385,36 @@ export default function App() {
     }
   };
 
-  // Strict Citizen Scoping: Citizens see only their own records; Officers & Admin see platform data
+  // Strict Role-Based Data Scoping (RBAC):
+  // - Citizen: sees ONLY their own complaints, notifications, and timeline updates
+  // - Municipal Officer: sees ONLY complaints within their municipal jurisdiction/city
+  // - Super Admin: sees all platform data
   const userEmailLower = (currentUser?.email || '').trim().toLowerCase();
-  const citizenComplaints =
-    currentUser?.role === 'officer' || currentUser?.role === 'admin'
+  const officerCityToken = (currentUser?.city || '')
+    .toLowerCase()
+    .replace(/municipal corporation|nagar nigam|smart city|madhya pradesh|mp/gi, '')
+    .split(',')[0]
+    .trim();
+
+  const citizenComplaints = userEmailLower
+    ? complaints.filter((c) => (c.citizenEmail || '').trim().toLowerCase() === userEmailLower)
+    : [];
+
+  const officerComplaints =
+    !officerCityToken || officerCityToken === 'indore'
       ? complaints
-      : userEmailLower
-      ? complaints.filter((c) => (c.citizenEmail || '').trim().toLowerCase() === userEmailLower)
+      : complaints.filter((c) => {
+          const blob = `${c.location || ''} ${c.ward || ''} ${c.department || ''}`.toLowerCase();
+          return blob.includes(officerCityToken) || !c.location || blob.includes('ward');
+        });
+
+  const roleScopedComplaints =
+    currentUser?.role === 'admin'
+      ? complaints
+      : currentUser?.role === 'officer'
+      ? officerComplaints
+      : currentUser?.role === 'citizen'
+      ? citizenComplaints
       : [];
 
   const citizenTicketIds = new Set(
@@ -365,14 +457,14 @@ export default function App() {
       )}
 
       {/* Main View Router */}
-      {activeView === 'my-complaints' && (
+      {activeView === 'my-complaints' && currentUser && (
         <MyComplaintsPage
           currentUser={currentUser}
           complaints={citizenComplaints}
           timelineUpdates={citizenTimelineUpdates}
           notifications={citizenNotifications}
           onNavigate={handleNavigate}
-          onOpenReportModal={() => setActiveView('report-issue')}
+          onOpenReportModal={handleOpenReportIssue}
           onSelectTicket={(ticket) => setSelectedTicket(ticket)}
           onOpenCertificate={() => setIsCertificateModalOpen(true)}
           onSwitchUserRole={handleSwitchUserRole}
@@ -385,7 +477,7 @@ export default function App() {
         />
       )}
 
-      {activeView === 'report-issue' && (
+      {activeView === 'report-issue' && currentUser && (
         <ReportIssuePage
           currentUser={currentUser}
           notifications={citizenNotifications}
@@ -395,7 +487,7 @@ export default function App() {
         />
       )}
 
-      {activeView === 'profile-settings' && (
+      {activeView === 'profile-settings' && currentUser && (
         <ProfileSettingsPage
           currentUser={currentUser}
           notifications={
@@ -417,18 +509,18 @@ export default function App() {
           complaints={complaints}
           onNavigate={handleNavigate}
           onLogout={handleLogout}
-          onOpenReportModal={() => setActiveView('report-issue')}
+          onOpenReportModal={handleOpenReportIssue}
           onTrackTicket={handleTrackTicket}
         />
       )}
 
-      {activeView === 'dashboard' && (
+      {activeView === 'dashboard' && currentUser && (
         <CitizenDashboard
           currentUser={currentUser}
           complaints={citizenComplaints}
           notifications={citizenNotifications}
           onNavigate={handleNavigate}
-          onOpenReportModal={() => setActiveView('report-issue')}
+          onOpenReportModal={handleOpenReportIssue}
           onSelectTicket={(ticket) => setSelectedTicket(ticket)}
           onOpenCertificate={() => setIsCertificateModalOpen(true)}
           onSwitchUserRole={handleSwitchUserRole}
@@ -438,10 +530,10 @@ export default function App() {
         />
       )}
 
-      {activeView === 'officer-dashboard' && (
+      {activeView === 'officer-dashboard' && currentUser?.role === 'officer' && (
         <OfficerDashboard
           currentUser={currentUser}
-          complaints={complaints}
+          complaints={officerComplaints}
           notifications={notifications}
           onNavigate={handleNavigate}
           onSelectTicket={(ticket) => setSelectedTicket(ticket)}
@@ -470,7 +562,7 @@ export default function App() {
         />
       )}
 
-      {activeView === 'admin-dashboard' && (
+      {activeView === 'admin-dashboard' && currentUser?.role === 'admin' && (
         <AdminDashboard
           currentUser={currentUser}
           liveComplaints={complaints}
@@ -482,7 +574,8 @@ export default function App() {
 
       {/* Modals */}
       <ReportIssueModal
-        isOpen={isReportModalOpen}
+        isOpen={Boolean(isReportModalOpen && currentUser?.email)}
+        currentUser={currentUser}
         onClose={() => setIsReportModalOpen(false)}
         onSubmitSuccess={handleReportSubmitSuccess}
       />
@@ -505,10 +598,10 @@ export default function App() {
         complaints={citizenComplaints}
       />
 
-      {/* Global Multi-Turn Supabase RAG + Google Maps Grounding AI Assistant */}
+      {/* Global Multi-Turn Supabase RAG + Google Maps Grounding AI Assistant (Strictly Role-Scoped) */}
       <CivicAiAssistant
         currentUser={currentUser}
-        complaints={complaints}
+        complaints={roleScopedComplaints}
         onSelectTicket={(ticket) => setSelectedTicket(ticket)}
         onNavigate={handleNavigate}
       />

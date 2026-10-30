@@ -202,15 +202,23 @@ export default function TicketDetailModal({
             </div>
           )}
 
-          {/* Officer Action Bar (if officer or quick simulation) */}
+          {/* Role-Based Action Bar: Only Officers & Admins can change status or dispatch crews; Citizens can attach photo evidence */}
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-bold text-slate-800">Municipal Status Control</div>
-              <div className="text-[11px] text-slate-500">Simulate workflow dispatch or mark resolved</div>
+              <div className="text-xs font-bold text-slate-800">
+                {currentUser?.role === 'officer' || currentUser?.role === 'admin'
+                  ? 'Municipal Status & Dispatch Control'
+                  : 'Citizen Evidence & Verification Actions'}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {currentUser?.role === 'officer' || currentUser?.role === 'admin'
+                  ? 'Authorized Officer / Admin workflow dispatch and status resolution'
+                  : 'Upload supplementary geo-tagged photo evidence for your complaint'}
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {ticket.status !== 'Resolved' && (
+              {(currentUser?.role === 'officer' || currentUser?.role === 'admin') && ticket.status !== 'Resolved' && (
                 <button
                   onClick={() => onStatusChange(ticket.id, 'Resolved')}
                   className="px-3.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
@@ -220,7 +228,7 @@ export default function TicketDetailModal({
                 </button>
               )}
 
-              {ticket.status !== 'In Progress' && (
+              {(currentUser?.role === 'officer' || currentUser?.role === 'admin') && ticket.status !== 'In Progress' && (
                 <button
                   onClick={() => onStatusChange(ticket.id, 'In Progress')}
                   className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"

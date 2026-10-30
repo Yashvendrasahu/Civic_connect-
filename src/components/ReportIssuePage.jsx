@@ -134,6 +134,14 @@ export default function ReportIssuePage({
   };
 
   const handleSubmitComplaint = () => {
+    if (!currentUser || !currentUser.email) {
+      if (onShowToast) {
+        onShowToast('बिना लॉगिन के शिकायत सबमिट नहीं हो सकती। कृपया पहले लॉगिन करें (Please sign in to submit a complaint).');
+      }
+      onNavigate('login');
+      return;
+    }
+
     try {
       confetti({
         particleCount: 100,
@@ -158,12 +166,11 @@ export default function ReportIssuePage({
       dimensions: 'Verified Field Scope',
       image: formData.image,
       description: formData.citizenStatement.trim() || `Citizen reported ${formData.issueType} at ${formData.address}.`,
-      citizenName: currentUser?.name || 'Citizen Reporter',
-      citizenEmail: currentUser?.email || ''
+      citizenName: currentUser.name || 'Citizen Reporter',
+      citizenEmail: currentUser.email
     };
 
     onSubmitSuccess(complaintPayload);
-    onNavigate('my-complaints');
   };
 
   return (
